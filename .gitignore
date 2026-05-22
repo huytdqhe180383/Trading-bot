@@ -1,0 +1,27 @@
+# Security
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+env/
+venv/
+
+# Data / Models (large files)
+data/raw/
+data/processed/
+models/
+results/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# Local test scratch output
+test_out.txt
