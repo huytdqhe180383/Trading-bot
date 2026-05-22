@@ -56,11 +56,181 @@ Use this decision table before installing anything:
 | WSL2 Ubuntu 22.04/24.04 | You want to keep Windows as the host OS | Official WSL path exists, but RX 6700 XT is not listed | Medium/high |
 | Native Ubuntu 22.04.5/24.04.4 | WSL2 does not detect the card or PyTorch cannot use HIP | Official Linux path exists, but RX 6700 XT is not listed | Medium |
 | Windows-native PyTorch ROCm | You want no Linux layer | Windows PyTorch ROCm matrix does not list RX 6700 XT | High |
+| Windows community ROCm 7.x stack | You want to test the `o0LINNY0o`/`guinmoon` RX 6700 XT path | Unofficial third-party wheels/builds | High |
 | CPU training | You need reproducibility immediately | Already works | Slow |
 
-## 3. WSL2 Path
+## 3. Windows Community ROCm 7.x Path
 
-### Step 3.1: Install or update WSL2
+This section follows the RX 6700 XT community stack from:
+
+```text
+https://github.com/o0LINNY0o/Local-AI-Stack_RX-6700-XT-ROCm-7.x.
+```
+
+Use it only in a disposable Python environment. It uses third-party wheels and
+custom libraries rather than AMD/PyTorch official packages. That is useful for
+experimentation, but it is not a low-risk system install.
+
+What the community guide contributes:
+
+- Windows ROCm 7.x/gfx1031 workflow for RX 6700 XT.
+- Custom PyTorch wheels from `guinmoon/rocm7_builds`.
+- ROCm SDK custom libraries from the same release set.
+- Manual `llama.cpp` build flags for `AMDGPU_TARGETS=gfx1031`.
+- `HIP_DEVICE_LIB_PATH` pointing at ROCm's AMDGCN bitcode directory.
+
+What does not directly transfer to this trading project:
+
+- The guide is mostly for `llama.cpp`, Open WebUI, TTS/STT, and local LLM
+  inference.
+- This project needs PyTorch/Stable-Baselines3 training, so the key test is
+  whether the custom PyTorch ROCm wheel works with `torch` and SAC/PPO.
+
+### Step 3.1: Prepare an isolated Windows Python 3.12 environment
+
+The community guide targets Python 3.12 wheels. Do not install these wheels into
+the existing Anaconda base environment.
+
+```powershell
+py -3.12 -m venv .venv-rocm-win
+.\.venv-rocm-win\Scripts\Activate.ps1
+python -m pip install --upgrade pip wheel setuptools
+python --version
+```
+
+Expected:
+
+```text
+Python 3.12.x
+```
+
+### Step 3.2: Download the community ROCm/PyTorch wheels
+
+From the `guinmoon/rocm7_builds` release referenced by the community guide,
+download all release assets into a local scratch folder, for example:
+
+```powershell
+mkdir C:\rocm6700xt-wheels
+```
+
+The referenced release is:
+
+```text
+https://github.com/guinmoon/rocm7_builds/releases/tag/build2025-12-02
+```
+
+The release notes say the build supports several architectures including
+`gfx1030` and `gfx1032`, and the `o0LINNY0o` guide applies it to RX 6700 XT
+`gfx1031`. Treat that `gfx1031` use as a community adaptation.
+
+### Step 3.3: Install the community Windows ROCm stack
+
+From the wheel download folder:
+
+```powershell
+pip install `
+  "rocm-7.2.0.tar.gz" `
+  "rocm_sdk_libraries_custom-7.2.0-py3-none-win_amd64.whl" `
+  "rocm_sdk_devel-7.2.0-py3-none-win_amd64.whl" `
+  "rocm_sdk_core-7.2.0-py3-none-win_amd64.whl"
+```
+
+Then install the matching PyTorch wheels:
+
+```powershell
+pip install `
+  "torch-2.9.1+rocmsdk20251203-cp312-cp312-win_amd64.whl" `
+  "torchaudio-2.9.0+rocmsdk20251203-cp312-cp312-win_amd64.whl" `
+  "torchvision-0.24.0+rocmsdk20251203-cp312-cp312-win_amd64.whl"
+```
+
+### Step 3.4: Verify PyTorch before installing project requirements
+
+Run this one-line check first:
+
+```powershell
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.version.hip); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"
+```
+
+Then run a small GPU math check:
+
+```powershell
+@'
+import torch
+print("torch:", torch.__version__)
+print("cuda available:", torch.cuda.is_available())
+print("hip:", torch.version.hip)
+print("device:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)
+if torch.cuda.is_available():
+    x = torch.randn(2048, 2048, device="cuda")
+    y = x @ x
+    torch.cuda.synchronize()
+    print("matmul mean:", y.mean().item())
+'@ | python -
+```
+
+Success criteria:
+
+- `torch.cuda.is_available()` returns `True`.
+- `torch.version.hip` is not `None`.
+- A CUDA-style PyTorch device name is returned for the AMD GPU.
+- The matrix multiplication runs without a HIP/kernel error.
+
+If these checks fail, stop this path and use WSL2/native Ubuntu instead.
+
+### Step 3.5: Install this project without replacing torch
+
+The project requirements can accidentally replace the custom wheel. Install
+everything except `torch`, `torchvision`, and `torchaudio` first:
+
+```powershell
+pip install stable-baselines3 sb3-contrib numpy==1.26.4 pandas scipy gymnasium matplotlib seaborn python-dotenv requests tqdm loguru ccxt binance-connector empyrical pyfolio-reloaded
+```
+
+Then run:
+
+```powershell
+python scripts\verify_gpu_training_stack.py
+python -m unittest discover -s tests
+```
+
+If PyTorch changed back to CPU-only, reinstall the community torch wheels and
+rerun the verifier.
+
+### Step 3.6: Optional llama.cpp build settings from the community repo
+
+This is not required for RL training, but it is useful if you also want local LLM
+inference on the RX 6700 XT.
+
+The community guide builds `llama.cpp` with:
+
+```batch
+set CC=C:\AMD\ROCm\7.2\lib\llvm\bin\clang.exe
+set CXX=C:\AMD\ROCm\7.2\lib\llvm\bin\clang++.exe
+set HIP_PATH=C:\AMD\ROCm\7.2
+set ROCM_PATH=C:\AMD\ROCm\7.2
+set HIP_PLATFORM=amd
+set HIP_DEVICE_LIB_PATH=C:\AMD\ROCm\7.2\lib\llvm\amdgcn\bitcode
+
+cmake -B build -G "Ninja" ^
+  -DGGML_HIP=ON ^
+  -DAMDGPU_TARGETS=gfx1031 ^
+  -DCMAKE_C_COMPILER="%CC%" ^
+  -DCMAKE_CXX_COMPILER="%CXX%" ^
+  -DCMAKE_PREFIX_PATH="C:\AMD\ROCm\7.2" ^
+  -DCMAKE_BUILD_TYPE=Release ^
+  -DHIP_PLATFORM=amd ^
+  -DCMAKE_HIP_FLAGS="--rocm-device-lib-path=C:/AMD/ROCm/7.2/lib/llvm/amdgcn/bitcode"
+
+cmake --build build --config Release
+```
+
+For this trading repo, keep this as a separate local AI stack. Do not mix
+`llama.cpp` build artifacts into the trading repo.
+
+## 4. WSL2 Path
+
+### Step 4.1: Install or update WSL2
 
 Open PowerShell as Administrator:
 
@@ -75,7 +245,7 @@ Ubuntu 22.04 and 24.04 are the WSL distributions listed by AMD's ROCm 7.2.1 WSL
 matrix. Start with Ubuntu 22.04 because AMD's WSL PyTorch wheel instructions
 provide Python 3.10 wheels for Ubuntu 22.04.
 
-### Step 3.2: Install the AMD WSL driver on Windows
+### Step 4.2: Install the AMD WSL driver on Windows
 
 Install the AMD Software: Adrenalin Edition driver variant that AMD lists for
 ROCm on WSL. For ROCm 7.2.1, AMD documents Adrenalin Edition 26.1.1 for WSL2.
@@ -87,7 +257,7 @@ wsl --shutdown
 Restart-Computer
 ```
 
-### Step 3.3: Install ROCm packages inside WSL Ubuntu
+### Step 4.3: Install ROCm packages inside WSL Ubuntu
 
 Open Ubuntu:
 
@@ -121,7 +291,7 @@ rocminfo | grep -E "Name:|Marketing Name:|gfx"
 For RX 6700 XT, look for a gfx1031-class device. If `rocminfo` cannot see the
 card, do not continue to PyTorch yet.
 
-## 4. PyTorch ROCm Setup in WSL
+## 5. PyTorch ROCm Setup in WSL
 
 AMD's ROCm 7.2 WSL guide recommends PyTorch 2.9.1 ROCm wheels and notes that
 Python 3.12 is needed for Ubuntu 24.04 wheels while Python 3.10 is used for
@@ -179,7 +349,7 @@ True
 <AMD GPU name>
 ```
 
-## 5. RX 6700 XT Experimental Compatibility Notes
+## 6. RX 6700 XT Experimental Compatibility Notes
 
 Because RX 6700 XT is not in the current official support matrix, PyTorch may
 fail even after `rocminfo` sees the GPU. Common failure modes include:
@@ -223,7 +393,7 @@ source .env.rocm-local
 Do not hide this workaround in project code. It should stay visible because it
 changes how ROCm identifies the GPU.
 
-## 6. Native Ubuntu Path
+## 7. Native Ubuntu Path
 
 Use this if WSL2 fails.
 
@@ -264,9 +434,9 @@ rocminfo | grep -E "Name:|Marketing Name:|gfx"
 clinfo | grep -E "Platform Name|Device Type|Board name"
 ```
 
-Then repeat the PyTorch ROCm setup from section 4.
+Then repeat the PyTorch ROCm setup from section 5.
 
-## 7. Connect This Repo to the ROCm Environment
+## 8. Connect This Repo to the ROCm Environment
 
 Inside WSL2 or native Ubuntu:
 
@@ -286,7 +456,7 @@ the ROCm torch wheels afterward, then rerun:
 python scripts/verify_gpu_training_stack.py
 ```
 
-## 8. Train With GPU Awareness
+## 9. Train With GPU Awareness
 
 This project currently sets:
 
@@ -322,7 +492,7 @@ Track:
 - TensorBoard reward curves
 - `results/backtest_metrics.csv`
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 If `rocminfo` is missing:
 
@@ -352,7 +522,7 @@ If training is slower on GPU:
 - Keep processed data on the Linux filesystem for WSL performance tests instead
   of repeatedly reading through `/mnt/k`.
 
-## 10. Source Notes
+## 11. Source Notes
 
 Primary sources checked:
 
@@ -370,4 +540,9 @@ Primary sources checked:
   `https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/native_linux/install-radeon.html`
 - PyTorch local install page:
   `https://pytorch.org/get-started/locally/`
-
+- Community RX 6700 XT Windows ROCm 7.x stack:
+  `https://github.com/o0LINNY0o/Local-AI-Stack_RX-6700-XT-ROCm-7.x.`
+- Community ROCm 7.x Windows wheel release used by that stack:
+  `https://github.com/guinmoon/rocm7_builds/releases/tag/build2025-12-02`
+- Community ROCm custom libraries:
+  `https://github.com/likelovewant/ROCmLibs-for-gfx1103-AMD780M-APU`
