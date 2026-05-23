@@ -295,7 +295,7 @@ def plot_kpi_radar(metrics: dict[str, float], targets: dict[str, float] = KPI_TA
     
     if save_path:
         plt.savefig(str(save_path), dpi=150, bbox_inches="tight")
-        print(f"Radar chart saved → {save_path}")
+        print(f"Radar chart saved -> {save_path}")
     plt.close()
 
 
@@ -330,5 +330,5 @@ def plot_equity_curve(
     plt.tight_layout()
     if save_path:
         plt.savefig(str(save_path), dpi=150)
-        print(f"Equity curve saved → {save_path}")
+        print(f"Equity curve saved -> {save_path}")
     plt.close()

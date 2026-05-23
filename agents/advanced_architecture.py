@@ -6,10 +6,10 @@ import gymnasium as gym
 
 # 1. Action Smoothing by Aligning Actions with Predictions from Preceding States (ASAP)
 class ASAPActionSmoother(ActionWrapper):
-    "\"\"
+    """
     Penalizes high-frequency oscillations by aligning actions with predictions 
     from preceding states. Acts as a spatiotemporal continuous filter.
-    "\"\"
+    """
     def __init__(self, env, smoothing_gamma=0.8):
         super().__init__(env)
         self.smoothing_gamma = smoothing_gamma
@@ -28,7 +28,7 @@ class ASAPActionSmoother(ActionWrapper):
 
 # 2. Meta-Labeling Two-Part System
 class PrimaryDirectionLSTM(nn.Module):
-    "\"\"LSTM Primary Agent: Solely predicts the market direction without capital sizing risk."\"\"
+    """LSTM primary agent for directional prediction without sizing decisions."""
     def __init__(self, input_dim, hidden_dim, num_assets):
         super().__init__()
         self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
@@ -42,7 +42,7 @@ class PrimaryDirectionLSTM(nn.Module):
         return torch.tanh(self.fc(attn_out[:, -1, :])) # [-1, 1] Directional certainty
 
 class MetaLabelingSizer(nn.Module):
-    "\"\"Secondary Meta-Agent: Takes LSTM certainty and macro risk factors to scale positions & set stops."\"\"
+    """Secondary meta-agent for position sizing from direction + macro state."""
     def __init__(self, hidden_dim, num_assets):
         super().__init__()
         self.net = nn.Sequential(

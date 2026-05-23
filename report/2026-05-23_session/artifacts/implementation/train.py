@@ -10,7 +10,6 @@ Usage:
 
 import argparse
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -33,7 +32,6 @@ from config import (
     ALGORITHMS, ALGO_KWARGS, TOTAL_TIMESTEPS, CHECKPOINT_FREQ,
     PROCESSED_DATA_DIR, MODELS_DIR, LOGS_DIR, SYMBOLS,
     TRAIN_DEVICE, REQUIRE_GPU_FOR_TRAINING, TRAIN_VALIDATION_FRACTION, TRAIN_SEED,
-    ENSEMBLE_METHOD,
 )
 from environment.trading_env import BinanceSpotEnv
 
@@ -243,7 +241,7 @@ def train_algo(
     eval_env.close()
 
 
-def build_parser() -> argparse.ArgumentParser:
+def main():
     parser = argparse.ArgumentParser(description="Train ensemble DRL agents for BTC/ETH trading.")
     parser.add_argument(
         "--algo", default="ALL",
@@ -275,54 +273,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional checkpoint file or directory to resume from.",
     )
-    parser.add_argument(
-        "--skip-backtest",
-        dest="post_training_backtest",
-        action="store_false",
-        default=True,
-        help="Skip the automatic post-training backtest.",
-    )
-    parser.add_argument(
-        "--post-backtest-pipeline",
-        default="rl_only",
-        choices=["rl_only", "rl_kronos", "rl_tradingagents", "rl_full"],
-        help="Pipeline used by the automatic post-training backtest.",
-    )
-    parser.add_argument(
-        "--post-backtest-realism-profile",
-        default="live_like",
-        choices=["baseline", "live_like"],
-        help="Realism profile used by the automatic post-training backtest.",
-    )
-    parser.add_argument(
-        "--post-backtest-method",
-        default=ENSEMBLE_METHOD,
-        choices=["mean", "voting", "weighted", "dynamic_weighted", "imca"],
-        help="Ensemble method used by the automatic post-training backtest.",
-    )
-    return parser
-
-
-def build_post_training_backtest_command(args: argparse.Namespace) -> list[str]:
-    return [
-        "backtest.py",
-        "--pipeline",
-        args.post_backtest_pipeline,
-        "--realism-profile",
-        args.post_backtest_realism_profile,
-        "--method",
-        args.post_backtest_method,
-    ]
-
-
-def run_post_training_backtest(args: argparse.Namespace) -> None:
-    command = build_post_training_backtest_command(args)
-    logger.info("Running post-training backtest: " + " ".join(command))
-    subprocess.run([sys.executable, *command], cwd=Path(__file__).resolve().parent, check=True)
-
-
-def main():
-    parser = build_parser()
     args = parser.parse_args()
 
     device = _resolve_device(args.device)
@@ -347,8 +297,6 @@ def main():
         )
 
     logger.success("Training complete for: " + ", ".join(algos))
-    if args.post_training_backtest:
-        run_post_training_backtest(args)
 
 
 if __name__ == "__main__":

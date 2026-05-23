@@ -54,14 +54,6 @@ GPU-capable training command:
 python train.py --algo ALL --device auto --require-gpu
 ```
 
-By default, `train.py` now runs a post-training RL-only, live-like backtest
-using the configured ensemble default (`dynamic_weighted`). To train without
-the automatic backtest:
-
-```powershell
-python train.py --algo ALL --device auto --skip-backtest
-```
-
 If GPU is unavailable and you still want a CPU run:
 
 ```powershell
@@ -73,19 +65,19 @@ python train.py --algo ALL --device cpu
 Single pipeline run:
 
 ```powershell
-python backtest.py --pipeline rl_full --realism-profile live_like --method dynamic_weighted
+python backtest.py --pipeline rl_full --realism-profile live_like --method mean
 ```
 
 Run all ablations for a profile:
 
 ```powershell
-python backtest.py --run-matrix --realism-profile live_like --method dynamic_weighted
+python backtest.py --run-matrix --realism-profile live_like --method mean
 ```
 
 Diagnose realism drift between baseline and live-like assumptions:
 
 ```powershell
-python backtest.py --diagnose-realism --method dynamic_weighted
+python backtest.py --diagnose-realism --method mean
 ```
 
 Outputs go to `results/`, including:
@@ -112,16 +104,16 @@ python run_live.py --enable-kronos --enable-tradingagents
 python run_live.py --disable-kronos --disable-tradingagents
 ```
 
-TradingAgents local research mode:
+TradingAgents provider fallback:
 
 - `TRADINGAGENTS_PROVIDER_FALLBACKS` in `config.py` controls order.
-- Research default order is `ollama` only; no ShopAI calls are made by default.
-- `ollama` is supported through `OLLAMA_BASE_URL`
+- `openai` requires `OPENAI_API_KEY`.
+- `groq` is supported as an alias through the OpenAI-compatible endpoint
+  (`GROQ_BASE_URL`, default `https://api.groq.com/openai/v1`) and `GROQ_API_KEY`.
+- `ollama` is supported as a local final fallback through `OLLAMA_BASE_URL`
   with `OLLAMA_MODEL` (default `qwen3.5:4b`; `qwen-3.5-4b` is accepted as an alias).
-- Dormant ShopAI support remains in the adapter for future deployment, but it
-  must be enabled explicitly and is intentionally absent from research defaults.
-- If Ollama is unavailable, TradingAgents returns no signal and the portfolio
-  remains RL-only for that layer. There is no heuristic trading fallback.
+- Provider-specific model names should be set per backend, for example
+  `OPENAI_MODEL`, `GROQ_MODEL`, and `OLLAMA_MODEL`.
 
 ## current results
 

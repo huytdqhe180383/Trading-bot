@@ -6,6 +6,8 @@ __pycache__/
 *.py[cod]
 *.pyo
 .venv/
+.venv-rocm-win/
+.venv-rocm-win-r/
 env/
 venv/
 
@@ -25,3 +27,14 @@ logs/
 
 # Local test scratch output
 test_out.txt
+
+# Local ROCm wheel/cache bundles
+rocm6700xt-wheels/
+tmp_rocm_guide/
+
+# Local agent/app metadata
+.commandcode/
+
+# Local source/vendor clones and generated baseline snapshots
+external/Kronos/
+archive/baseline_before_*/

@@ -1,184 +1,183 @@
-# FinRL-X Multi-Asset Portfolio Trading System
-## System Architecture & Project Documentation
+# BTC/ETH Trading Research Architecture
 
-This repository implements an automated, Reinforcement Learning-based (FinRL-X) trading system for managing a multi-asset cryptocurrency spot portfolio (BTC and ETH) quoted in USDT. 
+This repository is an OKX-first BTC/ETH spot allocation research system. The
+core trading policy is a PPO/SAC reinforcement-learning ensemble. Kronos and
+TradingAgents are optional overlays that may tilt the RL allocation, but missing
+or failed overlays are no-ops. There is no heuristic trading fallback.
 
-This document serves as the primary architectural reference for quantitative developers and researchers joining the project, detailing the data pipelines, environment mechanics, algorithmic ensemble logic, and the execution lifecycle.
+## Current Research Mode
 
----
+- Primary exchange runtime: OKX via `run_live.py` / `scripts/run_live.py`.
+- Active RL algorithms: PPO and SAC from Stable-Baselines3.
+- Default ensemble method: `dynamic_weighted`.
+- Default training budgets: PPO `200_000` steps, SAC `50_000` steps.
+- TradingAgents provider chain: local Ollama only.
+- Hosted ShopAI support remains dormant in code for later deployment, but it is
+  not part of the research default and should not be called unless explicitly
+  reconfigured.
 
-## Table of Contents
-1. [System Architecture Overview](#1-system-architecture-overview)
-2. [Directory Structure](#2-directory-structure)
-3. [Data Pipeline Layer](#3-data-pipeline-layer)
-4. [Reinforcement Learning Models & Ensemble Agent](#4-rl-models--ensemble-agent)
-5. [Environment Architecture (`BinanceSpotEnv`)](#5-environment-architecture-binancespotenv)
-6. [Execution Lifecycle & CLI Commands](#6-execution-lifecycle--cli-commands)
-
----
-
-## 1. System Architecture Overview
-
-The system uses a modular approach separating data engineering, agent policies, environment simulation, and live broker execution.
+## End-to-End Flow
 
 ```mermaid
-graph TD
-    subgraph Data Layer
-        A[download_historical.py] -->|Raw Parquet| B[preprocess.py]
-        B -->|Z-Score Normalised Parquet| C[(Processed Data)]
-    end
+flowchart LR
+  raw["Historical OHLCV\nOKX/default via CCXT"] --> prep["data/preprocess.py\nMTF indicators + leakage guards"]
+  prep --> train_data["Chronological training slice"]
+  prep --> test_data["Reserved test/backtest slice"]
 
-    subgraph Strategy Layer
-        C --> D[BinanceSpotEnv]
-        D -->|Vectorised Env| E[train.py]
-        E -->|Checkpoints| F[PPO Agent]
-        E -->|Checkpoints| G[SAC Agent]
-    end
+  train_data --> env_train["BinanceSpotEnv\nlegacy class name, spot weights"]
+  env_train --> trainer["train.py\nPPO 200k + SAC 50k"]
+  trainer --> ppo["models/PPO/ppo_best.zip"]
+  trainer --> sac["models/SAC/sac_best.zip"]
 
-    subgraph Ensemble Layer
-        F --> H[EnsembleAgent]
-        G --> H
-        H -.->|IMCA / Weighted| I[Aggregated Portfolio Weights]
-    end
+  ppo --> ensemble["EnsembleAgent\ndynamic_weighted default"]
+  sac --> ensemble
+  ensemble --> fusion["MetaFusionAgent\nrisk constraints"]
 
-    subgraph Execution Layer
-        C --> J[backtest.py]
-        J --> H
-        
-        K[live_feed.py / ccxt] --> L[run_live.py]
-        L --> H
-        H --> L
-        L -->|API Orders| M[Binance / OKX]
-    end
+  prep --> kronos["KronosAdapter\noptional native forecast"]
+  prep --> ta["TradingAgentsAdapter\nOllama-only research mode"]
+  kronos -.->|signal or null| fusion
+  ta -.->|signal or null| fusion
+
+  fusion --> backtest["backtest.py\nrl_only / rl_kronos / rl_tradingagents / rl_full"]
+  fusion --> live["run_live.py\nOKX-first dry-run/testnet/live"]
 ```
 
----
+## Repository Responsibilities
 
-## 2. Directory Structure
+- `config.py`: central budgets, provider defaults, risk limits, paths, and live
+  cadence.
+- `data/download_historical.py`: downloads historical market data, defaulting to
+  the configured exchange stack.
+- `data/preprocess.py`: creates multi-timeframe feature parquet files with
+  shifted higher-timeframe joins to reduce look-ahead leakage.
+- `environment/trading_env.py`: defines `BinanceSpotEnv`; the name is legacy,
+  but the environment models a generic BTC/ETH/USDT spot portfolio.
+- `train.py`: trains PPO/SAC, supports resume, deterministic seed plumbing, and
+  chronological validation splitting.
+- `agents/ensemble_agent.py`: combines PPO/SAC proposals. `dynamic_weighted` is
+  the current serious evaluation default; `mean` and `weighted` remain useful
+  baselines; `voting` and current `imca` are experimental until redesigned.
+- `adapters/kronos_adapter.py`: optional Kronos forecast overlay. Native failure
+  returns unavailable/no signal.
+- `adapters/tradingagents_adapter.py`: optional multi-agent LLM overlay. Research
+  mode uses only local Ollama and returns unavailable/no signal if Ollama fails.
+- `agents/meta_fusion_agent.py`: applies optional overlay tilts and portfolio
+  risk constraints; missing overlays do not tilt the RL allocation.
+- `backtest.py`: runs single pipelines, ablation matrices, realism profiles, and
+  RL diagnostics.
+- `scripts/run_live.py`: canonical OKX-first execution loop. Root `run_live.py`
+  is the compatibility entrypoint.
 
-- **`agents/`**: Contains the logic combining individual trained RL models into cohesive trading policies (e.g., `ensemble_agent.py`).
-- **`data/`**: The entire ETL pipeline logic (`download_historical.py`, `preprocess.py`, `live_feed.py`) and directories for `raw/` and `processed/` parquet files.
-- **`environment/`**: Contains `trading_env.py` - the Gymnasium-compatible environment containing the multi-objective reward function, hardcoded logic, and constraints.
-- **`logs/`**: Monitor files (CSV), Tensorboard event logs orchestrating the training progression.
-- **`metrics/`**: Evaluation logic mapping equity curves, Trade Counts, Sharpe/Sortino ratios, and Plotly visualization logic (`performance.py`).
-- **`models/`**: State dictionary dumps (`.zip` format) for stable-baselines3 agents (A2C, DDPG, PPO, SAC).
-- **`scripts/`**: (Or root) Operational endpoints for the user: `train.py`, `backtest.py`, `run_live.py`.
+## Data Splits And Training Hygiene
 
----
+The project uses chronological splits. Training-time model selection must not
+use the final test/backtest period.
 
-## 3. Data Pipeline Layer
-
-The data pipeline guarantees that the execution layer and the training layer see mathematically identical features, strictly guarding against look-ahead bias.
-
-### `download_historical.py`
-Retrieves bulk OHLCV monthly ZIP archives from Binance's public data portal (`data.binance.vision`). 
-- Escapes heavy REST API rate limiting.
-- Converts timestamps securely into millisecond epoch UTC indexes.
-- Outputs raw Multi-Timeframe (MTF) Dataframes into `/data/raw/` in `.parquet` format for extreme I/O speed.
-
-### `preprocess.py`
-Handles feature engineering, indicator generation, and stationary normalisation.
-- **Technical Indicators**: RSI, MACD, EMA bundles, ATR, Bollinger Band Widths, and OBV (On-Balance-Volume).
-- **ICT Concepts**: Calculates Fair Value Gaps (FVG) and short-term Liquidity Sweeps normalised against price.
-- **MTF Merging & Look-ahead Prevention**: Higher timeframe data (e.g. 4H, 1D) is aggregated onto the base interval (1H) using `pd.merge_asof(direction="backward")`. Furthermore, HTF data is artificially `.shift(1)` delayed to ensure an agent predicting at `09:00` cannot see the `12:00` daily close.
-- **Stationarity**: Numeric signals undergo a rolling Z-Score standardisation matching roughly 10 lookback windows so inputs have zero mean and unit variance.
-
-### `live_feed.py`
-*Note: In the current repository state, live state fetching is handled inherently via `CCXTBroker.fetch_state()` inside `run_live.py*`. If `live_feed.py` implements native WebSockets for deeper tick-level metrics bypassing REST, it requires further documentation on its interfacing mechanism.
-
----
-
-## 4. RL Models & Ensemble Agent
-
-We utilise continuous action-space algorithms from `stable-baselines3`.
-
-### Base Algorithms
-1. **PPO (Proximal Policy Optimization)**: On-policy, stable, and highly tuned for predictable continuous space mappings. Requires massive parallelization (`SubprocVecEnv`) and a large `2_000_000` timestep budget for efficient convergence.
-2. **SAC (Soft Actor-Critic)**: Off-policy algorithm optimising stochastic policies using an entropy bonus to encourage broad state-space exploration. Highly sample efficient (`300_000` timesteps via Replay Buffers).
-
-*(Note: While `A2C` and `DDPG` directories exist in the `logs/` tree, `config.py` enforces PPO/SAC as the active core algorithms).*
-
-### The Ensemble Agent (`agents/ensemble_agent.py`)
-Combines predictions from PPO and SAC to issue final portfolio weights `[BTC, ETH, USDT]`. 
-It implements multiple combination methods:
-- `mean` and `voting`: Simple averaging / categorical voting.
-- `weighted`: Static validation Sharpe ratio weighting.
-- `dynamic_weighted`: Periodically adjusts influence based on a trailing 7-day rolling Sharpe.
-- **`imca` (Iterative Model Combining Algorithm)**: A regime-aware router. Evaluates current market volatility (Bollinger Band width Z-scores) and macro trend (BTC distance from 200 SMA). For instance, in whipsaw low-trend regimens, it routes influence heavily toward the off-policy SAC adapter; in confirmed trends, PPO's structural trend-following weight is increased.
-
----
-
-## 5. Environment Architecture (`BinanceSpotEnv`)
-
-The `Gymnasium` environment simulates the portfolio across history while heavily penalising non-economic behavior.
-
-### Observation & Action Spaces
-- **Observation Space**: A flattened window (`LOOKBACK_WINDOW = 30`) of all symbol features, appended with current portfolio weights. The target `log_return` used for reward generation is deliberately detached from this array to block data leakage.
-- **Action Space (`Box([-1, 1])`)**: For the two assets (`N_ASSETS = 2`). The continuous logits are mapped into positive bounds `[0, 1]` via an internal continuous target softmax.
-- **Binance Spot Constraint**: The sum of requested weights defines asset allocation; $1 - \text{sum}(w)$ dictates the allocation to USDT (Cash). No synthetic shorting is possible.
-
-### Multi-Objective Reward System
-The composite reward function ($R_t$) directs the agent towards smooth compounding behavior via 4 linear weighted objectives:
-
-1. **Profit ($w=1.0$)**: Log return computed *strictly after transaction fees*.
-   - *Sortino Shaping Drop*: If the action results in negative equity flux, the penalty is dynamically multiplied by $2.5\times$ to strongly suppress downside capture.
-2. **Drawdown ($w=10.0$ / $2.0$)**: Uses a 100-step rolling window high-water mark.
-   - *Omega Ratio / CVaR Proxy*: The absolute drawdown value is **squared** (`dd^2 * 10`). This creates an exponential barrier: it ignores minor 1% localized noise but heavily penalizes 10%+ structural crashes.
-3. **Turnover ($w=0.5$)**: Applies Binance trading fees and `SLIPPAGE` penalties to weight changes.
-4. **Opportunity Cost ($w=1.5$)**: "Curing Turtling". During a confirmed macroeconomic uptrend ($>2\%$ distance from 1D SMA 200) where the agent is hiding in $>50\%$ cash, the step reward suffers a linear bleed rate scaled by the strength of the uptrend.
-
-### Custom Interventions & Hardcoded Protections
-- **Deadband Filter**: Setting `REBALANCE_THRESHOLD = 0.03`. If weight requests differ from the current state by less than 3%, the environment ignores the order. This stops the agent from bleeding capital on dust fees.
-- **Dust-Trade Filter**: Fixes environment accounting by forcing simulated transaction fees to 0 if the traded USDT notional is lower than `MIN_ORDER_USDT` (10 USD).
-- **Dynamic ATR Trailing Stops**: Tracks a synthetic price per asset. If drawdown from the local peak breaches `0.04 + ATR_Z * 0.01`, the environment *forces* mathematical liquidation of that asset into USDT overriding the agent policy.
-- **Kill-Switch**: At $15\%$ Absolute Drawdown from execution start, the agent suffers heavily ($-5.0$ reward) and the episode aborts, bounding the state space.
-- **Action Smoothing**: Employs Temporal Decay EMA (`alpha = 0.2`) on raw outputs during training to suppress erratic frame-by-frame asset flipping. Note: bypassed in live production via the `step_weights` path.
-
----
-
-## 6. Execution Lifecycle & CLI Commands
-
-### Phase 1: Data Preparation
-Download history and compute ML indicators.
-```bash
-# Obtain raw ZIP historicals
-python -m data.download_historical --start 2020-01-01 --end 2025-12-31
-
-# Compute MTF indicators, Normalisation, and Parquet caching
-python -m data.preprocess
+```mermaid
+flowchart LR
+  all["Processed history"] --> train["Training period\nTRAIN_START to TRAIN_END"]
+  all --> test["Reserved backtest period\nBACKTEST_START to BACKTEST_END"]
+  train --> fit["Fit slice"]
+  train --> val["Validation slice\nTRAIN_VALIDATION_FRACTION = 0.2"]
+  fit --> sb3["SB3 training env"]
+  val --> evalcb["EvalCallback env"]
+  test --> final["Final backtests and matrix runs"]
 ```
 
-### Phase 2: Training Base Agents
-Train models using CPU/Vectorised environments.
-```bash
-# Train PPO and SAC according to budget config
-python scripts/train.py --algo ALL
+Current defaults in `config.py`:
 
-# Force a specific algorithm with specific step budget
-python scripts/train.py --algo PPO --timesteps 1500000
-```
-*Outputs `best_model.zip` into `models/PPO/ppo_best.zip`.*
+- `TOTAL_TIMESTEPS["PPO"] = 200_000`
+- `TOTAL_TIMESTEPS["SAC"] = 50_000`
+- `TRAIN_VALIDATION_FRACTION = 0.2`
+- `TRAIN_SEED = 42`
 
-### Phase 3: Out-of-Sample Backtesting
-Evaluate the combined ensemble on the test split.
-```bash
-# Evaluate using market-adaptive weights (IMCA regime detection)
-python scripts/backtest.py --method imca
+Resume training without overriding budgets:
 
-# Force arithmetic mean across model logits
-python scripts/backtest.py --method mean
+```powershell
+.\.venv\Scripts\python.exe train.py --algo ALL --resume --device auto --seed 42 --validation-fraction 0.2
 ```
 
-### Phase 4: Live / Testnet Execution
-Executes the broker loop leveraging CCXT abstractions for OKX or Binance.
-```bash
-# Standard Testnet simulation
-python scripts/run_live.py --exchange binance --mode testnet --method imca
+`train.py` runs an automatic post-training backtest by default:
 
-# Run against production systems over REST API
-python scripts/run_live.py --exchange binance --mode live --method imca
-
-# Run in read-only / simulation layer
-python scripts/run_live.py --exchange binance --mode live --dry-run
+```powershell
+.\.venv\Scripts\python.exe backtest.py --pipeline rl_only --realism-profile live_like --method dynamic_weighted
 ```
-*Ensure `.env` contains `BINANCE_API_KEY`, `BINANCE_SECRET_KEY`, etc. Live script awakes natively once per hour (`REBALANCE_INTERVAL_SECS`) aligned with `KLINE_INTERVAL`.*
+
+Use `--skip-backtest` when a training-only run is needed. The automatic
+backtest can also be redirected with `--post-backtest-pipeline`,
+`--post-backtest-realism-profile`, and `--post-backtest-method`.
+
+## Ensemble And Fusion Behavior
+
+`EnsembleAgent` produces PPO and SAC proposal weights plus a final RL ensemble
+allocation. The default `dynamic_weighted` method adapts model influence from
+recent model performance and produced the latest best RL-only candidate in the
+current report artifacts.
+
+`MetaFusionAgent` receives the RL allocation plus optional Kronos and
+TradingAgents signals. If either overlay is unavailable, that overlay is skipped.
+If all overlays are unavailable, the final target remains the RL allocation after
+normal global constraints such as max asset weight, cash floor, and turnover cap.
+
+## TradingAgents And Kronos Research Defaults
+
+TradingAgents is configured for local-only research mode:
+
+- `TRADINGAGENTS_PROVIDER = "ollama"`
+- `TRADINGAGENTS_PROVIDER_FALLBACKS = ["ollama"]`
+- `OLLAMA_BASE_URL = http://localhost:11434/v1` in `.env.example`
+- `OLLAMA_MODEL = qwen3.5:4b` in `.env.example`
+
+If Ollama is unavailable, TradingAgents records diagnostics and returns `None`.
+It does not synthesize a heuristic trade. Kronos follows the same no-heuristic
+contract: native init/inference failure returns unavailable/no signal.
+
+## Backtest And Evaluation Commands
+
+Pre-training checks:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests
+.\.venv\Scripts\python.exe train.py --help
+.\.venv\Scripts\python.exe backtest.py --help
+```
+
+RL-only dynamic weighted backtest:
+
+```powershell
+.\.venv\Scripts\python.exe backtest.py --pipeline rl_only --realism-profile live_like --method dynamic_weighted
+```
+
+Full ablation matrix with local Ollama-only overlay behavior:
+
+```powershell
+.\.venv\Scripts\python.exe backtest.py --run-matrix --realism-profile live_like --method dynamic_weighted
+```
+
+Useful outputs:
+
+- `results/backtest_metrics.csv`
+- `results/backtest_matrix_metrics.csv`
+- `results/backtest_episode.parquet`
+- `results/backtest_rl_diagnostics.csv`
+- `results/backtest_ensemble_method_comparison.csv`
+- `logs/tradingagents_decisions.jsonl`
+
+## Live Execution
+
+The root wrapper is the preferred operator entrypoint:
+
+```powershell
+.\.venv\Scripts\python.exe run_live.py --exchange okx --mode testnet --dry-run --method dynamic_weighted
+```
+
+Component toggles:
+
+```powershell
+.\.venv\Scripts\python.exe run_live.py --exchange okx --mode testnet --dry-run --enable-kronos --enable-tradingagents
+.\.venv\Scripts\python.exe run_live.py --exchange okx --mode testnet --dry-run --disable-kronos --disable-tradingagents
+```
+
+Live safety remains strict: unavailable requested overlays stay visible in
+diagnostics and safety reasons, but they do not inject fallback trades.
+

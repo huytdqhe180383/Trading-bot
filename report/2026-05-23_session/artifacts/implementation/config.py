@@ -133,13 +133,11 @@ CHECKPOINT_FREQ = {
 
 TRAIN_DEVICE = "auto"
 REQUIRE_GPU_FOR_TRAINING = False
-TRAIN_VALIDATION_FRACTION = 0.2
-TRAIN_SEED = 42
 
 # ============================================================
 # ENSEMBLE SETTINGS
 # ============================================================
-ENSEMBLE_METHOD = "dynamic_weighted"
+ENSEMBLE_METHOD = "mean"
 
 # ============================================================
 # LIVE TRADING SETTINGS
@@ -158,8 +156,8 @@ KRONOS_MODEL_ID = "NeoQuasar/Kronos-mini"
 KRONOS_TOKENIZER_ID = "NeoQuasar/Kronos-Tokenizer-2k"
 KRONOS_FORECAST_HORIZON = 1
 
-TRADINGAGENTS_PROVIDER = "ollama"
-TRADINGAGENTS_PROVIDER_FALLBACKS = ["ollama"]
+TRADINGAGENTS_PROVIDER = "openai"
+TRADINGAGENTS_PROVIDER_FALLBACKS = ["openai", "groq", "ollama"]
 TRADINGAGENTS_DECISION_LOG_PATH = LOGS_DIR / "tradingagents_decisions.jsonl"
 TRADINGAGENTS_CHECKPOINT_ENABLED = False
 TRADINGAGENTS_MAX_RETRIES = 5
