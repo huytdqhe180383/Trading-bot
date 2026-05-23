@@ -88,12 +88,20 @@ Diagnose realism drift between baseline and live-like assumptions:
 python backtest.py --diagnose-realism --method dynamic_weighted
 ```
 
+Compare all ensemble aggregation methods and generate a combined plot:
+
+```powershell
+python backtest.py --compare-ensemble-methods --realism-profile live_like
+```
+
 Outputs go to `results/`, including:
 
 - `backtest_metrics.csv`
 - `backtest_episode.parquet`
 - `backtest_matrix_metrics.csv`
 - `backtest_realism_report.csv`
+- `backtest_ensemble_method_comparison.csv`
+- `backtest_ensemble_method_comparison.png`
 - `equity_curve.png`
 - `kpi_target_radar.png`
 

@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from gymnasium import ActionWrapper
-import gymnasium as gym
 
 # 1. Action Smoothing by Aligning Actions with Predictions from Preceding States (ASAP)
 class ASAPActionSmoother(ActionWrapper):

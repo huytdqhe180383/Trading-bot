@@ -23,12 +23,11 @@ import gymnasium as gym
 import numpy as np
 import pandas as pd
 from gymnasium import spaces
-from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import (
     SYMBOLS, INITIAL_CAPITAL, BINANCE_SPOT_FEE,
-    LOOKBACK_WINDOW, N_ASSETS, SLIPPAGE, REWARD_WEIGHTS,
+    LOOKBACK_WINDOW, N_ASSETS, SLIPPAGE,
     MIN_ORDER_USDT, REBALANCE_THRESHOLD,   # Fix 3-D, 3-F
 )
 

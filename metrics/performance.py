@@ -8,14 +8,12 @@ operational categories as agreed in the project plan.
 
 import sys
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")    # headless – no display required
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import seaborn as sns
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -332,3 +330,73 @@ def plot_equity_curve(
         plt.savefig(str(save_path), dpi=150)
         print(f"Equity curve saved -> {save_path}")
     plt.close()
+
+
+def plot_ensemble_method_comparison(
+    comparison_df: pd.DataFrame,
+    equity_curves: dict[str, pd.Series],
+    save_path: Path | None = None,
+) -> list[str]:
+    """Plot equity curves and summary metrics for every compared ensemble method."""
+    required = {"method", "total_return_pct", "sharpe_ratio", "max_drawdown_pct"}
+    missing = required.difference(comparison_df.columns)
+    if missing:
+        raise ValueError(f"comparison_df is missing required columns: {sorted(missing)}")
+
+    methods = [str(method) for method in comparison_df["method"].tolist()]
+    sns.set_theme(style="darkgrid")
+    fig, axes = plt.subplots(2, 1, figsize=(15, 10), gridspec_kw={"height_ratios": [3, 2]})
+
+    palette = sns.color_palette("tab10", n_colors=max(len(methods), 1))
+    color_by_method = dict(zip(methods, palette))
+
+    for method in methods:
+        curve = equity_curves.get(method)
+        if curve is None or curve.empty:
+            continue
+        axes[0].plot(
+            curve.index,
+            curve.values,
+            label=method,
+            linewidth=1.5,
+            color=color_by_method[method],
+        )
+    axes[0].set_title("Ensemble Method Equity Curves")
+    axes[0].set_ylabel("Portfolio Value ($)")
+    axes[0].legend(loc="best")
+
+    x = np.arange(len(methods))
+    width = 0.25
+    axes[1].bar(
+        x - width,
+        comparison_df["total_return_pct"].astype(float),
+        width,
+        label="Return %",
+        color="#2ca02c",
+    )
+    axes[1].bar(
+        x,
+        comparison_df["sharpe_ratio"].astype(float),
+        width,
+        label="Sharpe",
+        color="#1f77b4",
+    )
+    axes[1].bar(
+        x + width,
+        comparison_df["max_drawdown_pct"].astype(float),
+        width,
+        label="Max DD %",
+        color="#d62728",
+    )
+    axes[1].axhline(0, color="#222222", linewidth=0.8)
+    axes[1].set_title("Method Metrics")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(methods, rotation=15, ha="right")
+    axes[1].legend(loc="best")
+
+    fig.tight_layout()
+    if save_path:
+        plt.savefig(str(save_path), dpi=150, bbox_inches="tight")
+        print(f"Ensemble method comparison plot saved -> {save_path}")
+    plt.close(fig)
+    return methods

@@ -154,6 +154,12 @@ Full ablation matrix with local Ollama-only overlay behavior:
 .\.venv\Scripts\python.exe backtest.py --run-matrix --realism-profile live_like --method dynamic_weighted
 ```
 
+All-method ensemble comparison:
+
+```powershell
+.\.venv\Scripts\python.exe backtest.py --compare-ensemble-methods --realism-profile live_like
+```
+
 Useful outputs:
 
 - `results/backtest_metrics.csv`
@@ -161,6 +167,7 @@ Useful outputs:
 - `results/backtest_episode.parquet`
 - `results/backtest_rl_diagnostics.csv`
 - `results/backtest_ensemble_method_comparison.csv`
+- `results/backtest_ensemble_method_comparison.png`
 - `logs/tradingagents_decisions.jsonl`
 
 ## Live Execution

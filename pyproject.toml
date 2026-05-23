@@ -1,0 +1,26 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [
+    ".venv",
+    ".venv-rocm-win",
+    ".venv-rocm-win-r",
+    "archive",
+    "data/raw",
+    "data/processed",
+    "external",
+    "logs",
+    "models",
+    "report/**/artifacts",
+    "results",
+]
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

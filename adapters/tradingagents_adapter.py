@@ -187,8 +187,8 @@ class TradingAgentsAdapter:
 
     def _try_init_backend(self) -> None:
         try:
-            from tradingagents.default_config import DEFAULT_CONFIG  # type: ignore
-            from tradingagents.graph.trading_graph import TradingAgentsGraph  # type: ignore
+            import tradingagents.default_config  # type: ignore  # noqa: F401
+            import tradingagents.graph.trading_graph  # type: ignore  # noqa: F401
         except Exception as exc:
             logger.warning(f"TradingAgents module not importable ({exc}). Returning unavailable signal.")
             return

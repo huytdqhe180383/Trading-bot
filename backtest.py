@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -24,8 +23,6 @@ from config import (
     BACKTEST_LIVE_LIKE_FEE,
     BACKTEST_LIVE_LIKE_LATENCY_STEPS,
     BACKTEST_LIVE_LIKE_SLIPPAGE,
-    ENABLE_KRONOS,
-    ENABLE_TRADINGAGENTS,
     ENSEMBLE_METHOD,
     INITIAL_CAPITAL,
     KRONOS_FORECAST_HORIZON,
@@ -49,7 +46,12 @@ from config import (
     LOOKBACK_WINDOW,
 )
 from environment.trading_env import BinanceSpotEnv, _softmax_weights
-from metrics.performance import compute_metrics, plot_equity_curve, plot_kpi_radar
+from metrics.performance import (
+    compute_metrics,
+    plot_ensemble_method_comparison,
+    plot_equity_curve,
+    plot_kpi_radar,
+)
 
 load_dotenv()
 
@@ -409,6 +411,7 @@ def run_ensemble_method_comparison(
 ) -> pd.DataFrame:
     benchmark = build_benchmark_nav(test_data)
     rows: list[dict[str, Any]] = []
+    equity_curves: dict[str, pd.Series] = {}
     for method in ["mean", "voting", "weighted", "dynamic_weighted", "imca"]:
         episode_df, trades_count, meta = run_backtest(
             test_data=test_data,
@@ -416,6 +419,7 @@ def run_ensemble_method_comparison(
             pipeline="rl_only",
             realism_profile=realism_profile,
         )
+        equity_curves[method] = episode_df["portfolio_value"].copy()
         metrics = compute_metrics(
             episode_df["portfolio_value"],
             initial_capital=INITIAL_CAPITAL,
@@ -429,6 +433,11 @@ def run_ensemble_method_comparison(
         _print_metrics(f"rl_only/{realism_profile}/{method}", metrics)
     out = pd.DataFrame(rows)
     out.to_csv(RESULTS_DIR / "backtest_ensemble_method_comparison.csv", index=False)
+    plot_ensemble_method_comparison(
+        out,
+        equity_curves,
+        save_path=RESULTS_DIR / "backtest_ensemble_method_comparison.png",
+    )
     return out
 
 
