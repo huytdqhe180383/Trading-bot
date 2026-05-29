@@ -7,6 +7,7 @@ from .risk_constraints import (
     limit_turnover,
     normalize_weights,
 )
+from .post_policy_overlay import apply_post_policy_overlay
 
 __all__ = [
     "normalize_weights",
@@ -14,4 +15,5 @@ __all__ = [
     "apply_min_cash_floor",
     "limit_turnover",
     "apply_global_constraints",
+    "apply_post_policy_overlay",
 ]

@@ -30,6 +30,65 @@ ALGO_CLS = {
 }
 
 
+def _normalize_score_map(score_map: dict[str, float]) -> dict[str, float]:
+    clipped = {k: max(float(v), 1e-6) for k, v in score_map.items()}
+    total = sum(clipped.values()) or 1.0
+    return {k: v / total for k, v in clipped.items()}
+
+
+def _defensive_score(returns: np.ndarray) -> float:
+    arr = np.asarray(returns, dtype=np.float32)
+    if arr.size == 0:
+        return 1.0
+    downside = arr[arr < 0.0]
+    downside_vol = float(downside.std()) if downside.size else 0.0
+    cumulative = np.cumprod(1.0 + arr)
+    peak = np.maximum.accumulate(cumulative)
+    max_dd = abs(float(((cumulative - peak) / (peak + 1e-9)).min()))
+    mean_ret = float(arr.mean())
+    penalty = downside_vol * np.sqrt(24 * 365) + (max_dd * 2.0)
+    return max(0.1, 1.0 + mean_ret - penalty)
+
+
+def compute_regime_weighted_scores(
+    *,
+    base_scores: dict[str, float],
+    returns_history: dict[str, Any],
+    volatility_z: float,
+    macro_trend: float,
+    rolling_drawdown: float,
+) -> tuple[dict[str, float], dict[str, float | str]]:
+    normalized_base = _normalize_score_map(base_scores)
+    stress_strength = float(np.clip(max(volatility_z - 1.0, 0.0), 0.0, 1.0))
+    if macro_trend < 0.0:
+        stress_strength = max(stress_strength, float(np.clip(abs(macro_trend), 0.0, 1.0)))
+    if rolling_drawdown <= -0.08:
+        dd_strength = min(1.0, abs(float(rolling_drawdown)) / 0.15)
+        stress_strength = max(stress_strength, dd_strength)
+
+    if stress_strength <= 1e-9:
+        return dict(base_scores), {"regime_label": "calm", "stress_strength": 0.0}
+
+    defensive_raw = {}
+    for algo, hist in returns_history.items():
+        defensive_raw[algo] = _defensive_score(np.array(hist, dtype=np.float32))
+    defensive_norm = _normalize_score_map(defensive_raw)
+
+    mixed = {}
+    for algo in normalized_base:
+        mixed_weight = ((1.0 - stress_strength) * normalized_base[algo]) + (
+            stress_strength * defensive_norm.get(algo, normalized_base[algo])
+        )
+        mixed[algo] = mixed_weight
+
+    final_norm = _normalize_score_map(mixed)
+    scaled = {
+        algo: max(float(base_scores.get(algo, 1.0)), 1e-6) * final_norm[algo] / max(normalized_base[algo], 1e-6)
+        for algo in normalized_base
+    }
+    return scaled, {"regime_label": "stress", "stress_strength": stress_strength}
+
+
 def load_agent(algo: str, path: Path) -> Any:
     """Load a single trained SB3 model from disk."""
     cls = ALGO_CLS[algo]
@@ -91,6 +150,7 @@ class EnsembleAgent:
         self.method   = method
         # Sharpe scores used when method == "weighted"
         self._sharpes = agent_sharpes or {a: 1.0 for a in ensemble}
+        self._model_mix_diagnostics = {a: 1.0 for a in ensemble}
 
     def predict(self, obs: np.ndarray) -> np.ndarray:
         """Return combined portfolio weights (n_assets + 1,)."""
@@ -119,7 +179,7 @@ class EnsembleAgent:
                 result += (s / total_sharpe) * w
             return result
 
-        elif self.method in ["dynamic_weighted", "imca"]:
+        elif self.method in ["dynamic_weighted", "regime_weighted", "imca"]:
             # Uses _sharpes as dynamically updated weights from the outside
             total_weight = sum(max(self._sharpes.get(a, 1e-6), 1e-6) for a in self.ensemble)
             result = np.zeros(N_ASSETS + 1, dtype=np.float32)

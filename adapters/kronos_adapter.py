@@ -186,11 +186,13 @@ class KronosAdapter:
             [anchor_ts + step_delta * (i + 1) for i in range(self.forecast_horizon)],
             tz="UTC",
         )
+        x_timestamp = pd.Series(x_df.index, name="timestamp")
+        y_timestamp = pd.Series(y_index, name="timestamp")
 
         pred_df = self._predictor.predict(  # type: ignore[union-attr]
             df=x_df,
-            x_timestamp=x_df.index,
-            y_timestamp=y_index,
+            x_timestamp=x_timestamp,
+            y_timestamp=y_timestamp,
             pred_len=self.forecast_horizon,
             T=1.0,
             top_p=0.9,

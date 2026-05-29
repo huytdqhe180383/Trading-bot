@@ -1,0 +1,4 @@
+PID=7612
+STDOUT=logs\train_20260523_182039_risk_governor_clean_stdout.log
+STDERR=logs\train_20260523_182039_risk_governor_clean_stderr.log
+START=2026-05-23T18:20:39.4900785+07:00

@@ -15,7 +15,8 @@ train.py                        -> PPO/SAC training (GPU-capable)
 agents/ensemble_agent.py        -> RL ensemble allocation
 adapters/kronos_adapter.py      -> Kronos forecast adapter (fallback-safe)
 adapters/tradingagents_adapter.py -> TradingAgents adapter (fallback-safe)
-agents/meta_fusion_agent.py     -> RL + Kronos + TradingAgents fusion
+adapters/llm_risk_gate_adapter.py -> low-cadence local LLM risk gate (Ollama)
+agents/meta_fusion_agent.py     -> RL + overlays fusion (Kronos / TradingAgents / LLM risk gate)
 backtest.py                     -> ablations + realism profiles + reports
 scripts/run_live.py             -> canonical live/testnet execution runner
 run_live.py                     -> compatibility wrapper to scripts/run_live.py
@@ -74,6 +75,7 @@ Single pipeline run:
 
 ```powershell
 python backtest.py --pipeline rl_full --realism-profile live_like --method dynamic_weighted
+python backtest.py --pipeline rl_llm_risk_gate --realism-profile live_like --method dynamic_weighted
 ```
 
 Run all ablations for a profile:
@@ -105,12 +107,33 @@ Outputs go to `results/`, including:
 - `equity_curve.png`
 - `kpi_target_radar.png`
 
+LLM risk gate (research mode defaults):
+
+- `LLM_RISK_GATE_ENABLED = True`
+- `LLM_RISK_GATE_CADENCE = "weekly"`
+- `LLM_RISK_GATE_MODE = "de_risk"`
+- `LLM_RISK_GATE_TIMEOUT_SECS = 5.0`
+- On timeout/unavailable provider, fallback is `allow` (no override), so RL remains authoritative.
+
 ## live execution
 
 Primary runner (OKX default):
 
 ```powershell
-python run_live.py --exchange okx --mode testnet --dry-run
+python run_live.py --exchange okx --mode testnet --dry-run --max-cycles 1
+```
+
+Current live baseline:
+
+- model source: `models/live_baseline`
+- method: `dynamic_weighted`
+- overlays: disabled by default (`ENABLE_KRONOS=false`, `ENABLE_TRADINGAGENTS=false`)
+- execution controls: adaptive threshold + cooldown + reversal hysteresis + delayed position-reset reset
+
+Paper/dry-run verification without private credentials:
+
+```powershell
+python run_live.py --exchange okx --mode testnet --dry-run --max-cycles 1 --bootstrap-usdt 10000
 ```
 
 Enable/disable fusion components:
@@ -125,7 +148,9 @@ TradingAgents local research mode:
 - `TRADINGAGENTS_PROVIDER_FALLBACKS` in `config.py` controls order.
 - Research default order is `ollama` only; no ShopAI calls are made by default.
 - `ollama` is supported through `OLLAMA_BASE_URL`
-  with `OLLAMA_MODEL` (default `qwen3.5:4b`; `qwen-3.5-4b` is accepted as an alias).
+  with `OLLAMA_MODEL` (default `qwen3.5:4b-gpu8k`; `qwen-3.5-4b` is accepted as an alias).
+- The recommended local model profile is built from `ollama/qwen3.5-4b-gpu8k.Modelfile`
+  to cap context at 8k and keep the model fully GPU-resident.
 - Dormant ShopAI support remains in the adapter for future deployment, but it
   must be enabled explicitly and is intentionally absent from research defaults.
 - If Ollama is unavailable, TradingAgents returns no signal and the portfolio
@@ -153,6 +178,7 @@ python scripts/verify_gpu_training_stack.py
 
 Detailed ROCm notes:
 
+- `docs/rocm_runtime_architecture.md`
 - `docs/rx6700xt_rocm_training.md`
 
 ## git and data hygiene
@@ -167,4 +193,6 @@ Keep secrets, raw market data, model artifacts, and logs out of commits.
 - `docs/project_comprehensive_report_and_integration_plan.md`
 - `docs/codebase_audit.md`
 - `docs/architecture.md`
+- `docs/digitalocean_live_deployment_guide.md`
+- `docs/rocm_runtime_architecture.md`
 - `docs/trading_env_documentation.md`

@@ -18,6 +18,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import (
+    BASE_TIMEFRAME,
     KLINE_INTERVAL,
     LOOKBACK_WINDOW,
     MAX_RECONNECT_ATTEMPTS,
@@ -106,7 +107,10 @@ class CCXTExchangeGateway:
 
         features: dict[str, pd.DataFrame] = {}
         for symbol, frame in raw_state.items():
-            enriched = _add_indicators(frame.copy())
+            feature_input = frame.copy()
+            if self.timeframe != BASE_TIMEFRAME:
+                feature_input = feature_input.shift(1)
+            enriched = _add_indicators(feature_input)
             drop_cols = ["open", "high", "low", "close", "volume"]
             enriched.drop(columns=drop_cols, inplace=True, errors="ignore")
             enriched = _rolling_z_score(enriched, window=len(enriched))

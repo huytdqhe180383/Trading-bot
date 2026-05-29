@@ -86,3 +86,67 @@ def apply_global_constraints(
     tgt = normalize_weights(tgt, n_assets)
     constrained = limit_turnover(cur, tgt, max_turnover=max_turnover)
     return normalize_weights(constrained, n_assets)
+
+
+def apply_stress_risk_governor(
+    *,
+    weights: np.ndarray,
+    n_assets: int,
+    volatility_z: float,
+    drawdown: float,
+    vol_z_threshold: float,
+    drawdown_threshold: float,
+    crisis_drawdown_threshold: float,
+    stress_cash_floor: float,
+    crisis_cash_floor: float,
+    stress_max_risk_on: float,
+    crisis_max_risk_on: float,
+    enabled: bool = True,
+) -> tuple[np.ndarray, dict[str, float | str | bool]]:
+    """Raise cash and cap risk exposure in high-volatility or drawdown regimes."""
+    normalized = normalize_weights(weights, n_assets)
+    diagnostics: dict[str, float | str | bool] = {
+        "active": False,
+        "reason": "",
+        "cash_floor": float(normalized[-1]),
+        "max_risk_on": float(normalized[:-1].sum()),
+    }
+    if not enabled:
+        return normalized, diagnostics
+
+    is_crisis = float(drawdown) <= float(crisis_drawdown_threshold)
+    is_stress = (
+        float(volatility_z) >= float(vol_z_threshold)
+        or float(drawdown) <= float(drawdown_threshold)
+    )
+    if not (is_stress or is_crisis):
+        return normalized, diagnostics
+
+    cash_floor = float(crisis_cash_floor if is_crisis else stress_cash_floor)
+    max_risk_on = float(crisis_max_risk_on if is_crisis else stress_max_risk_on)
+    max_risk_on = min(max_risk_on, 1.0 - cash_floor)
+
+    governed = apply_min_cash_floor(normalized, cash_floor)
+    risk_on = float(governed[:-1].sum())
+    if risk_on > max_risk_on and risk_on > 0:
+        governed[:-1] = governed[:-1] * (max_risk_on / risk_on)
+        governed[-1] = 1.0 - float(governed[:-1].sum())
+
+    governed = normalize_weights(governed, n_assets)
+    reason_parts = []
+    if float(volatility_z) >= float(vol_z_threshold):
+        reason_parts.append("high_volatility")
+    if float(drawdown) <= float(drawdown_threshold):
+        reason_parts.append("drawdown")
+    if is_crisis:
+        reason_parts.append("crisis_drawdown")
+
+    diagnostics.update(
+        {
+            "active": True,
+            "reason": ",".join(reason_parts),
+            "cash_floor": cash_floor,
+            "max_risk_on": max_risk_on,
+        }
+    )
+    return governed, diagnostics

@@ -58,13 +58,13 @@ class TradingAgentsAdapterTest(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=False):
             resolved = adapter._resolve_provider_config("ollama")
         self.assertEqual(resolved["llm_provider"], "ollama")
-        self.assertEqual(resolved["model_overrides"]["quick_think_llm"], "qwen3.5:4b")
+        self.assertEqual(resolved["model_overrides"]["quick_think_llm"], "qwen3.5:4b-gpu8k")
 
     def test_ollama_provider_accepts_requested_alias(self):
         adapter = TradingAgentsAdapter(enabled=False)
         with patch.dict(os.environ, {"OLLAMA_MODEL": "qwen-3.5-4b"}, clear=False):
             resolved = adapter._resolve_provider_config("ollama")
-        self.assertEqual(resolved["model_overrides"]["quick_think_llm"], "qwen3.5:4b")
+        self.assertEqual(resolved["model_overrides"]["quick_think_llm"], "qwen3.5:4b-gpu8k")
 
     def test_evaluate_maps_crypto_pair_and_asset_type(self):
         captured: dict[str, str] = {}

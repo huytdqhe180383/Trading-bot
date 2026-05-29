@@ -2,7 +2,36 @@
 Central configuration for the BTC/ETH auto-trading system.
 """
 
+import os
 from pathlib import Path
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return float(raw)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return int(raw)
+
+
+def _env_str(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip()
 
 # ============================================================
 # PROJECT PATHS
@@ -12,11 +41,14 @@ DATA_DIR = BASE_DIR / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 MODELS_DIR = BASE_DIR / "models"
+LIVE_BASELINE_MODEL_DIR = Path(
+    _env_str("LIVE_BASELINE_MODEL_DIR", str(MODELS_DIR / "live_baseline"))
+)
 LOGS_DIR = BASE_DIR / "logs"
 RESULTS_DIR = BASE_DIR / "results"
 ARCHIVE_DIR = BASE_DIR / "archive"
 
-for d in [RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, LOGS_DIR, RESULTS_DIR, ARCHIVE_DIR]:
+for d in [RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, LIVE_BASELINE_MODEL_DIR, LOGS_DIR, RESULTS_DIR, ARCHIVE_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 # ============================================================
@@ -44,7 +76,7 @@ TRAIN_START = "2020-01-01"
 TRAIN_END = "2023-12-31"
 
 BACKTEST_START = "2024-01-01"
-BACKTEST_END = "2026-03-01"
+BACKTEST_END = "2026-05-23"
 
 BASE_TIMEFRAME = "1h"
 MTF_TIMEFRAMES = ["1h", "4h", "1d"]
@@ -59,14 +91,51 @@ N_ASSETS = len(SYMBOLS)
 MIN_ORDER_USDT = 10.0
 SLIPPAGE = 0.001
 REBALANCE_THRESHOLD = 0.03
+REBALANCE_THRESHOLD_NORMAL = _env_float("REBALANCE_THRESHOLD_NORMAL", REBALANCE_THRESHOLD)
+REBALANCE_THRESHOLD_STRESS = _env_float("REBALANCE_THRESHOLD_STRESS", 0.05)
+REBALANCE_THRESHOLD_CRISIS = _env_float("REBALANCE_THRESHOLD_CRISIS", 0.08)
+MIN_HOLD_BARS = _env_int("MIN_HOLD_BARS", 4)
+MATERIAL_TRADE_THRESHOLD = _env_float("MATERIAL_TRADE_THRESHOLD", 0.05)
+REVERSAL_HYSTERESIS_MULT = _env_float("REVERSAL_HYSTERESIS_MULT", 1.5)
+POSITION_RESET_WEIGHT_THRESHOLD = _env_float("POSITION_RESET_WEIGHT_THRESHOLD", 0.05)
+POSITION_RESET_PERSIST_BARS = _env_int("POSITION_RESET_PERSIST_BARS", 2)
+
+SLIPPAGE_MODEL = _env_str("SLIPPAGE_MODEL", "flat")  # flat | vol_scaled
+SLIPPAGE_VOL_WINDOW = _env_int("SLIPPAGE_VOL_WINDOW", 24)
+SLIPPAGE_VOL_SCALAR = _env_float("SLIPPAGE_VOL_SCALAR", 10.0)
+SLIPPAGE_VOL_CAP_MULT = _env_float("SLIPPAGE_VOL_CAP_MULT", 3.0)
+
+KILL_SWITCH_ENABLED_EVAL = _env_bool("KILL_SWITCH_ENABLED_EVAL", False)
+KILL_SWITCH_DRAWDOWN_THRESHOLD = _env_float("KILL_SWITCH_DRAWDOWN_THRESHOLD", -0.15)
+
+STEP_TURNOVER_CAP_ENABLED = _env_bool("STEP_TURNOVER_CAP_ENABLED", False)
+STEP_TURNOVER_CAP_NORMAL = _env_float("STEP_TURNOVER_CAP_NORMAL", 0.20)
+STEP_TURNOVER_CAP_STRESS = _env_float("STEP_TURNOVER_CAP_STRESS", 0.12)
+STEP_TURNOVER_CAP_CRISIS = _env_float("STEP_TURNOVER_CAP_CRISIS", 0.08)
 
 REWARD_WEIGHTS = {
-    "profit": 1.0,
-    "sharpe": 0.0,
-    "drawdown": 10.0,
-    "turnover": 0.0,
-    "missed_opportunity": 0.5,
+    "profit": _env_float("REWARD_PROFIT_WEIGHT", 1.0),
+    "sharpe": _env_float("REWARD_SHARPE_WEIGHT", 0.0),
+    "drawdown": _env_float("REWARD_DRAWDOWN_WEIGHT", 10.0),
+    "turnover": _env_float("REWARD_TURNOVER_WEIGHT", 1.0),
+    "missed_opportunity": _env_float("REWARD_MISSED_OPPORTUNITY_WEIGHT", 0.5),
+    "tail_loss": _env_float("REWARD_TAIL_LOSS_WEIGHT", 2.0),
 }
+REWARD_ACTION_DELTA_WEIGHT = _env_float("REWARD_ACTION_DELTA_WEIGHT", 0.10)
+REWARD_ACTION_DELTA_DEADBAND = _env_float("REWARD_ACTION_DELTA_DEADBAND", 0.03)
+REWARD_ACTION_DELTA_SCALE = _env_float("REWARD_ACTION_DELTA_SCALE", 1.0)
+
+TAIL_RISK_WINDOW = 24 * 7
+TAIL_RISK_ALPHA = 0.05
+
+RISK_GOVERNOR_ENABLED = _env_bool("RISK_GOVERNOR_ENABLED", True)
+RISK_GOVERNOR_VOL_Z_THRESHOLD = _env_float("RISK_GOVERNOR_VOL_Z_THRESHOLD", 1.0)
+RISK_GOVERNOR_DRAWDOWN_THRESHOLD = _env_float("RISK_GOVERNOR_DRAWDOWN_THRESHOLD", -0.08)
+RISK_GOVERNOR_CRISIS_DRAWDOWN_THRESHOLD = _env_float("RISK_GOVERNOR_CRISIS_DRAWDOWN_THRESHOLD", -0.15)
+RISK_GOVERNOR_STRESS_CASH_FLOOR = _env_float("RISK_GOVERNOR_STRESS_CASH_FLOOR", 0.25)
+RISK_GOVERNOR_CRISIS_CASH_FLOOR = _env_float("RISK_GOVERNOR_CRISIS_CASH_FLOOR", 0.45)
+RISK_GOVERNOR_STRESS_MAX_RISK_ON = _env_float("RISK_GOVERNOR_STRESS_MAX_RISK_ON", 0.75)
+RISK_GOVERNOR_CRISIS_MAX_RISK_ON = _env_float("RISK_GOVERNOR_CRISIS_MAX_RISK_ON", 0.55)
 
 # ============================================================
 # KPI TARGETS
@@ -151,8 +220,8 @@ REBALANCE_INTERVAL_SECS = 3600
 # ============================================================
 # SIGNAL INTEGRATION (Kronos + TradingAgents + Meta-Fusion)
 # ============================================================
-ENABLE_KRONOS = True
-ENABLE_TRADINGAGENTS = True
+ENABLE_KRONOS = False
+ENABLE_TRADINGAGENTS = False
 
 KRONOS_MODEL_ID = "NeoQuasar/Kronos-mini"
 KRONOS_TOKENIZER_ID = "NeoQuasar/Kronos-Tokenizer-2k"
@@ -167,6 +236,18 @@ TRADINGAGENTS_RETRY_BACKOFF_SECS = 1.0
 TRADINGAGENTS_CALL_TIMEOUT_SECS = 45.0
 TRADINGAGENTS_BACKTEST_CADENCE = "weekly"
 TRADINGAGENTS_LIVE_CADENCE = "hourly"
+
+# ============================================================
+# LLM RISK GATE (LOCAL OLLAMA, LOW-COST)
+# ============================================================
+LLM_RISK_GATE_ENABLED = True
+LLM_RISK_GATE_CADENCE = "weekly"  # 6h | 24h | weekly
+LLM_RISK_GATE_CACHE_TTL = 604_800
+LLM_RISK_GATE_MAX_CALLS_PER_DAY = 8
+LLM_RISK_GATE_MODE = "de_risk"  # allow_only | de_risk | block
+LLM_RISK_GATE_TIMEOUT_SECS = 5.0
+LLM_RISK_GATE_MAX_RETRIES = 1
+LLM_RISK_GATE_DECISION_LOG_PATH = LOGS_DIR / "llm_risk_gate_decisions.jsonl"
 
 MAX_TILT_PER_SIGNAL = 0.05
 MAX_PORTFOLIO_TURNOVER = 0.25

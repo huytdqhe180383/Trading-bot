@@ -88,6 +88,18 @@ def _ulcer_index(nav: pd.Series) -> float:
     return float(np.sqrt((dd**2).mean()))
 
 
+def _cvar(nav: pd.Series, alpha: float) -> float:
+    """Conditional value at risk for hourly log returns, reported as percent."""
+    r = _log_returns(nav)
+    if r.empty:
+        return 0.0
+    threshold = r.quantile(alpha)
+    tail = r[r <= threshold]
+    if tail.empty:
+        return 0.0
+    return float(tail.mean() * 100.0)
+
+
 def _calmar_ratio(nav: pd.Series) -> float:
     ann_ret = _annualised_return(nav)
     mdd = abs(_max_drawdown(nav))
@@ -188,6 +200,8 @@ def compute_metrics(
         "calmar_ratio":          _calmar_ratio(nav),
         "recovery_factor":       _recovery_factor(nav, initial_capital),        
         "ulcer_index":           _ulcer_index(nav),
+        "cvar_95_pct":           _cvar(nav, 0.05),
+        "cvar_99_pct":           _cvar(nav, 0.01),
         "avg_drawdown_duration_steps": _average_drawdown_duration(nav),
         # Operational
         "time_in_market_pct":    _time_in_market(nav),

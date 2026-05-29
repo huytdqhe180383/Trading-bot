@@ -1,23 +1,15 @@
-# Report Archive
+# Report Directory
 
-This folder stores timestamped snapshots of training artifacts, backtest outputs, logs, implementation snapshots, and session reports.
+Canonical report layout:
 
-## Sessions
+- `report/daily/YYYY-MM-DD/` stores normal daily/session reports written on that date.
+- `report/important/` stores durable reports for architecture changes, overhauls, code restructures, integration plans, and major postmortems.
 
-- `2026-05-23_session`
-  - Main report: `report/2026-05-23_session/session_report.md`
-  - Integration diagnosis: `report/2026-05-23_session/integration_failure_diagnosis.md`
-  - ShopAI/Ollama + RL note: `report/2026-05-23_session/shopai_ollama_rl_improvement_note.md`
-  - Includes:
-    - `artifacts/results/`: backtest CSVs, parquet episodes, charts
-    - `artifacts/logs/`: matrix logs, eval monitors, training logs, tensorboard data, TradingAgents decisions
-    - `artifacts/implementation/`: source snapshot of the key integration files
-    - `artifacts/docs/`: copied planning document
-    - `metadata/`: git head, branch, status, diff stat, archive creation time
+Generated result snapshots follow the same convention under `results/`:
 
-## Usage
+- `results/daily/YYYY-MM-DD/`
+- `results/important/`
 
-- Start with the session report for the high-level summary.
-- Use `artifacts/results/backtest_matrix_metrics.csv` for pipeline comparison.
-- Use `artifacts/logs/matrix_run.err` to inspect provider failures and fallback behavior.
-- Use `artifacts/implementation/` to recover the exact integration snapshot that produced the archived results.
+The legacy `report/2026-05-23_session/` folder is retained only for previously committed session artifacts and should not be used for new reports.
+
+See `AGENTS.md` for the full rule and completion checklist.

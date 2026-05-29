@@ -23,7 +23,7 @@ from stable_baselines3.common.callbacks import (
     StopTrainingOnNoModelImprovement,
 )
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 import torch
@@ -115,6 +115,26 @@ def _resolve_resume_checkpoint(algo: str, explicit: Path | None = None) -> Path 
     return None
 
 
+def _load_resumed_model(
+    cls,
+    *,
+    checkpoint: str | Path,
+    env,
+    device: str,
+    tensorboard_log: str,
+    seed: int,
+):
+    model = cls.load(
+        str(checkpoint),
+        env=env,
+        device=device,
+        tensorboard_log=tensorboard_log,
+    )
+    if hasattr(model, "set_random_seed"):
+        model.set_random_seed(seed)
+    return model
+
+
 def train_algo(
     algo: str,
     timesteps: int,
@@ -124,6 +144,8 @@ def train_algo(
     validation_fraction: float,
     resume: bool = False,
     resume_from: Path | None = None,
+    enable_eval_callback: bool = True,
+    progress_bar: bool = False,
 ):
     """Train a single algorithm and save the best model."""
     logger.info(f"\n{'='*50}\n  Training: {algo} | Steps: {timesteps:,}\n{'='*50}")
@@ -145,9 +167,20 @@ def train_algo(
         env = BinanceSpotEnv(eval_data, mode="eval")
         return Monitor(env, str(LOGS_DIR / f"{algo}_eval"))
 
-    n_cpus = max(1, min(8, (os.cpu_count() or 1)))
-    train_env = make_vec_env(make_train_env, n_envs=n_cpus, seed=seed, vec_env_cls=SubprocVecEnv)
-    eval_env  = make_vec_env(make_eval_env, n_envs=1, seed=seed + 10_000, vec_env_cls=SubprocVecEnv)
+    if algo == "SAC":
+        # SB3 off-policy MLP training is more stable with one synchronous env here;
+        # SubprocVecEnv can wedge during long SAC resume runs on this Windows setup.
+        n_envs = 1
+        train_vec_cls = DummyVecEnv
+        eval_vec_cls = DummyVecEnv
+    else:
+        n_envs = max(1, min(8, (os.cpu_count() or 1)))
+        train_vec_cls = SubprocVecEnv
+        eval_vec_cls = SubprocVecEnv
+    train_env = make_vec_env(make_train_env, n_envs=n_envs, seed=seed, vec_env_cls=train_vec_cls)
+    eval_env = None
+    if enable_eval_callback:
+        eval_env = make_vec_env(make_eval_env, n_envs=1, seed=seed + 10_000, vec_env_cls=eval_vec_cls)
 
     # ── Callbacks ────────────────────────────────────────────────────────
     model_dir = MODELS_DIR / algo
@@ -162,24 +195,25 @@ def train_algo(
         verbose=1,
     )
 
-    early_stop_cb = StopTrainingOnNoModelImprovement(
-        max_no_improvement_evals=10,
-        min_evals=20,
-        verbose=1,
-    )
+    callbacks = [checkpoint_cb]
+    if enable_eval_callback and eval_env is not None:
+        early_stop_cb = StopTrainingOnNoModelImprovement(
+            max_no_improvement_evals=10,
+            min_evals=20,
+            verbose=1,
+        )
 
-    eval_cb = EvalCallback(
-        eval_env,
-        best_model_save_path=str(model_dir),
-        log_path=str(LOGS_DIR / algo),
-        eval_freq=max(1, checkpoint_freq // n_cpus),
-        n_eval_episodes=5,
-        deterministic=True,
-        callback_after_eval=early_stop_cb,
-        verbose=1,
-    )
-    # Rename the SB3 default "best_model" to an algo-specific name after training
-    callbacks = [checkpoint_cb, eval_cb]
+        eval_cb = EvalCallback(
+            eval_env,
+            best_model_save_path=str(model_dir),
+            log_path=str(LOGS_DIR / algo),
+            eval_freq=max(1, checkpoint_freq // n_envs),
+            n_eval_episodes=5,
+            deterministic=True,
+            callback_after_eval=early_stop_cb,
+            verbose=1,
+        )
+        callbacks.append(eval_cb)
 
     # ── Model ────────────────────────────────────────────────────────────
     cls    = ALGO_CLS[algo]
@@ -191,11 +225,13 @@ def train_algo(
         checkpoint = _resolve_resume_checkpoint(algo, explicit=resume_from)
         if checkpoint is not None:
             logger.info(f"Resuming {algo} from checkpoint: {checkpoint}")
-            model = cls.load(
-                str(checkpoint),
+            model = _load_resumed_model(
+                cls,
+                checkpoint=checkpoint,
                 env=train_env,
                 device=device,
                 tensorboard_log=str(LOGS_DIR / "tensorboard"),
+                seed=seed,
             )
         else:
             logger.warning(f"Resume requested for {algo}, but no checkpoint was found. Starting fresh.")
@@ -222,7 +258,7 @@ def train_algo(
             total_timesteps=timesteps,
             callback=callbacks,
             tb_log_name=algo,
-            progress_bar=True,
+            progress_bar=progress_bar,
             reset_num_timesteps=not resume,
         )
     except KeyboardInterrupt:
@@ -235,12 +271,12 @@ def train_algo(
         sb3_best.replace(algo_best)
         logger.success(f"Best {algo} model saved → {algo_best}")
     else:
-        logger.warning(f"No best_model.zip found for {algo}; saving final model.")
-        final_path = model_dir / f"{algo.lower()}_final.zip"
-        model.save(str(final_path))
+        logger.warning(f"No best_model.zip found for {algo}; saving final weights to {algo_best}.")
+        model.save(str(algo_best))
 
     train_env.close()
-    eval_env.close()
+    if eval_env is not None:
+        eval_env.close()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -276,6 +312,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional checkpoint file or directory to resume from.",
     )
     parser.add_argument(
+        "--disable-eval-callback",
+        action="store_true",
+        help="Train without EvalCallback and promote final weights directly to the algo best checkpoint.",
+    )
+    parser.add_argument(
+        "--progress-bar",
+        action="store_true",
+        help="Enable the SB3 rich progress bar.",
+    )
+    parser.add_argument(
         "--skip-backtest",
         dest="post_training_backtest",
         action="store_false",
@@ -297,7 +343,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--post-backtest-method",
         default=ENSEMBLE_METHOD,
-        choices=["mean", "voting", "weighted", "dynamic_weighted", "imca"],
+        choices=["mean", "voting", "weighted", "dynamic_weighted", "regime_weighted", "imca"],
         help="Ensemble method used by the automatic post-training backtest.",
     )
     return parser
@@ -344,6 +390,8 @@ def main():
             validation_fraction=args.validation_fraction,
             resume=args.resume,
             resume_from=resume_from_path,
+            enable_eval_callback=not args.disable_eval_callback,
+            progress_bar=args.progress_bar,
         )
 
     logger.success("Training complete for: " + ", ".join(algos))

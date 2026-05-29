@@ -24,9 +24,10 @@ except Exception:  # pragma: no cover - fallback when loguru is unavailable
 
 _DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 _DEFAULT_SHOPAI_BASE_URL = "https://api.shopaikey.com/v1"
-_DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
+_DEFAULT_OLLAMA_MODEL = "qwen3.5:4b-gpu8k"
 _OLLAMA_MODEL_ALIASES = {
-    "qwen-3.5-4b": "qwen3.5:4b",
+    "qwen-3.5-4b": "qwen3.5:4b-gpu8k",
+    "qwen3.5:4b": "qwen3.5:4b-gpu8k",
 }
 _SUPPORTED_LLM_PROVIDERS = {
     "openai",

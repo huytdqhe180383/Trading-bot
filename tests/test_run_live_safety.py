@@ -1,14 +1,41 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
 from adapters.kronos_adapter import KronosSignal
 from adapters.tradingagents_adapter import TradingAgentsSignal
-from scripts.run_live import compute_turnover, evaluate_safety_gates, latest_market_timestamp
+from scripts.run_live import (
+    LiveExecutionController,
+    append_live_session_row,
+    compute_turnover,
+    create_live_session_dir,
+    evaluate_safety_gates,
+    has_exchange_credentials,
+    latest_market_timestamp,
+    resolve_live_model_dir,
+    write_live_session_metadata,
+    write_live_session_summary,
+)
 
 
 class RunLiveSafetyTest(unittest.TestCase):
+    def test_parser_accepts_regime_weighted_method(self):
+        from scripts.run_live import argparse, ENSEMBLE_METHOD
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--method",
+            default=ENSEMBLE_METHOD,
+            choices=["mean", "voting", "weighted", "dynamic_weighted", "regime_weighted", "imca"],
+        )
+
+        args = parser.parse_args(["--method", "regime_weighted"])
+        self.assertEqual(args.method, "regime_weighted")
+
     @staticmethod
     def _raw_state(ts: str) -> dict[str, pd.DataFrame]:
         index = pd.DatetimeIndex([pd.Timestamp(ts, tz="UTC")])
@@ -29,6 +56,62 @@ class RunLiveSafetyTest(unittest.TestCase):
         current = np.array([0.4, 0.3, 0.3], dtype=np.float32)
         target = np.array([0.55, 0.2, 0.25], dtype=np.float32)
         self.assertAlmostEqual(compute_turnover(current, target), 0.25, places=6)
+
+    def test_resolve_live_model_dir_prefers_live_baseline_when_complete(self):
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            live = base / "live"
+            (live / "PPO").mkdir(parents=True)
+            (live / "SAC").mkdir(parents=True)
+            (live / "PPO" / "ppo_best.zip").write_bytes(b"ppo")
+            (live / "SAC" / "sac_best.zip").write_bytes(b"sac")
+            self.assertEqual(resolve_live_model_dir(live), live)
+
+    def test_has_exchange_credentials_checks_okx_triplet(self):
+        env = {
+            "OKX_TESTNET_API_KEY": "a",
+            "OKX_TESTNET_SECRET_KEY": "b",
+            "OKX_TESTNET_PASSPHRASE": "c",
+        }
+        with patch.dict("os.environ", env, clear=False):
+            self.assertTrue(has_exchange_credentials("okx", "testnet"))
+        with patch.dict("os.environ", {"OKX_TESTNET_API_KEY": "a"}, clear=True):
+            self.assertFalse(has_exchange_credentials("okx", "testnet"))
+
+    def test_live_execution_controller_blocks_small_stress_rebalance(self):
+        controller = LiveExecutionController()
+        idx = pd.date_range("2026-01-01", periods=5, freq="h", tz="UTC")
+        frame = pd.DataFrame({"bb_width": [1.5] * 5, "atr_14": [0.0] * 5}, index=idx)
+        adjusted, diag = controller.apply(
+            target_weights=np.array([0.34, 0.30, 0.36], dtype=np.float32),
+            current_weights=np.array([0.30, 0.30, 0.40], dtype=np.float32),
+            prices={"BTCUSDT": 100.0, "ETHUSDT": 50.0},
+            feature_state={"BTCUSDT": frame, "ETHUSDT": frame.copy()},
+            nav=10_000.0,
+        )
+        self.assertTrue(diag["rebalance_blocked_by_deadband"])
+        self.assertAlmostEqual(float(adjusted[0]), 0.30, places=6)
+
+    def test_live_session_artifacts_are_created(self):
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            session_dir = create_live_session_dir(base, run_date="2026-05-29")
+            self.assertEqual(session_dir, base / "daily" / "2026-05-29" / "1")
+            write_live_session_metadata(session_dir, {"exchange": "okx", "mode": "testnet"})
+            row = {
+                "timestamp_utc": "2026-05-29T00:00:00+00:00",
+                "cycle": 1,
+                "status": "ok",
+                "nav": 10000.0,
+                "orders_submitted": 2,
+                "orders_filled": 2,
+            }
+            append_live_session_row(session_dir / "live_trade_decisions_okx_testnet.csv", row)
+            write_live_session_summary(session_dir, [row])
+
+            self.assertTrue((session_dir / "live_session_metadata.json").exists())
+            self.assertTrue((session_dir / "live_trade_decisions_okx_testnet.csv").exists())
+            self.assertTrue((session_dir / "live_session_summary.json").exists())
 
     def test_safety_gates_accept_fresh_native_signals(self):
         raw_state = self._raw_state("2026-01-01 10:00:00")

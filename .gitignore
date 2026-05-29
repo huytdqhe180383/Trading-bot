@@ -38,3 +38,4 @@ tmp_rocm_guide/
 # Local source/vendor clones and generated baseline snapshots
 external/Kronos/
 archive/baseline_before_*/
+archive/pre_*/

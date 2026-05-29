@@ -1,0 +1,2 @@
+timestamp,portfolio_value,btc_weight,eth_weight,cash_weight,turnover,transaction_cost,ppo_btc_weight,ppo_eth_weight,ppo_cash_weight,sac_btc_weight,sac_eth_weight,sac_cash_weight,drawdown_pct
+2026-02-06 00:00:00+00:00,10249.140225334868,0.33676475,0.4623817,0.20085356,0.03523769974708557,0.00010571310122031718,0.2693893,0.7306107,0.0,0.3871101,0.22207093,0.39081895,-55.721102768688
