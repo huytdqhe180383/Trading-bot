@@ -401,7 +401,7 @@ Use this if your GitHub repo is public, or if you already know how to authentica
 Example:
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git /home/deploy/trading-bot
+git clone https://github.com/huytdqhe180383/Trading-bot.git /home/deploy/trading-bot
 ```
 
 ### Option B: Upload A ZIP Or Copy The Repo Folder
@@ -432,21 +432,34 @@ Because `.env` and `models/` are not committed, upload them manually from your W
 From PowerShell on your PC:
 
 ```powershell
-scp "K:\BTC-ETH Trading\.env" deploy@YOUR_DROPLET_IP:/home/deploy/trading-bot/.env
+scp "K:\BTC-ETH Trading\.env" deploy@174.138.26.180:/home/deploy/trading-bot/.env
 ```
 
 ### Upload the live baseline model
 
-From PowerShell on your PC:
-
-```powershell
-scp -r "K:\BTC-ETH Trading\models\live_baseline" deploy@YOUR_DROPLET_IP:/home/deploy/trading-bot/models/
-```
-
-If `models/` does not exist on the server yet, create it first:
+First create the remote directory on the server:
 
 ```bash
 mkdir -p /home/deploy/trading-bot/models
+```
+
+From PowerShell on your PC:
+
+```powershell
+scp -r "K:\BTC-ETH Trading\models\live_baseline" deploy@174.138.26.180:/home/deploy/trading-bot/models/
+```
+
+If Windows `scp` still complains, use this fallback form instead:
+
+```powershell
+scp -r "K:\BTC-ETH Trading\models\live_baseline" deploy@174.138.26.180:/home/deploy/trading-bot/
+```
+
+Then on the server move it into place:
+
+```bash
+mkdir -p /home/deploy/trading-bot/models
+mv /home/deploy/trading-bot/live_baseline /home/deploy/trading-bot/models/live_baseline
 ```
 
 ### Verify on the server
@@ -511,10 +524,29 @@ cd /home/deploy/trading-bot
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-live.txt
 ```
 
 This may take a little while.
+
+Why `requirements-live.txt` and not `requirements.txt`:
+
+- `requirements.txt` includes backtest/research packages
+- one of those packages, `empyrical`, currently fails to build under Python `3.12`
+- the live runner does not need that package
+- the live server should install only the runtime needed for live trading
+
+If you already ran the wrong install command and hit the `empyrical` error, the safest recovery is:
+
+```bash
+cd /home/deploy/trading-bot
+deactivate 2>/dev/null || true
+rm -rf .venv
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements-live.txt
+```
 
 When it finishes, test the key imports:
 
@@ -997,4 +1029,3 @@ These are the main official pages I used for pricing and setup guidance:
 - Monitoring quickstart: https://docs.digitalocean.com/products/monitoring/getting-started/quickstart/
 - Monitoring alerts: https://docs.digitalocean.com/products/monitoring/how-to/manage-alerts/
 - Backups pricing: https://docs.digitalocean.com/products/backups/details/pricing/
-

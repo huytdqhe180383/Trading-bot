@@ -1,0 +1,13 @@
+# Live trading deployment dependencies only.
+# Excludes research/backtest-only packages that are unnecessary on a small server.
+
+stable-baselines3>=2.7.1
+numpy>=1.26.0
+pandas>=2.1.0
+pandas-ta>=0.3.14b
+scipy>=1.11.0
+ccxt>=4.4.0
+gymnasium>=0.29.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+loguru>=0.7.2

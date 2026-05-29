@@ -32,6 +32,9 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
+For a small live-only server deployment, use `requirements-live.txt` instead of
+the full research stack in `requirements.txt`.
+
 Prepare data:
 
 ```powershell
