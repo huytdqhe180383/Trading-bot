@@ -18,6 +18,7 @@ adapters/tradingagents_adapter.py -> TradingAgents adapter (fallback-safe)
 adapters/llm_risk_gate_adapter.py -> low-cadence local LLM risk gate (Ollama)
 agents/meta_fusion_agent.py     -> RL + overlays fusion (Kronos / TradingAgents / LLM risk gate)
 backtest.py                     -> ablations + realism profiles + reports
+environment/trading_env.py      -> `SpotPortfolioEnv` generic spot portfolio env
 scripts/run_live.py             -> canonical live/testnet execution runner
 run_live.py                     -> compatibility wrapper to scripts/run_live.py
 ```
@@ -197,5 +198,6 @@ Keep secrets, raw market data, model artifacts, and logs out of commits.
 - `docs/codebase_audit.md`
 - `docs/architecture.md`
 - `docs/digitalocean_live_deployment_guide.md`
+- `docs/digitalocean_paper_trading_command_cheatsheet.md`
 - `docs/rocm_runtime_architecture.md`
 - `docs/trading_env_documentation.md`

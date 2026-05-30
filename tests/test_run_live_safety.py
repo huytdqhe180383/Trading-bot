@@ -11,6 +11,7 @@ from adapters.tradingagents_adapter import TradingAgentsSignal
 from scripts.run_live import (
     LiveExecutionController,
     append_live_session_row,
+    compute_nav_scaled_max_asset_weight,
     compute_turnover,
     create_live_session_dir,
     evaluate_safety_gates,
@@ -24,6 +25,11 @@ from scripts.run_live import (
 
 
 class RunLiveSafetyTest(unittest.TestCase):
+    def test_nav_scaled_max_asset_weight_follows_smooth_curve(self):
+        self.assertAlmostEqual(compute_nav_scaled_max_asset_weight(100.0), 0.35, places=6)
+        self.assertAlmostEqual(compute_nav_scaled_max_asset_weight(300.0), 0.575, places=6)
+        self.assertAlmostEqual(compute_nav_scaled_max_asset_weight(500.0), 0.80, places=6)
+
     def test_parser_accepts_regime_weighted_method(self):
         from scripts.run_live import argparse, ENSEMBLE_METHOD
 
@@ -102,6 +108,21 @@ class RunLiveSafetyTest(unittest.TestCase):
         )
         self.assertTrue(diag["rebalance_blocked_by_deadband"])
         self.assertAlmostEqual(float(adjusted[0]), 0.30, places=6)
+
+    def test_live_execution_controller_applies_nav_scaled_position_cap(self):
+        controller = LiveExecutionController()
+        idx = pd.date_range("2026-01-01", periods=5, freq="h", tz="UTC")
+        frame = pd.DataFrame({"bb_width": [0.0] * 5, "atr_14": [0.0] * 5}, index=idx)
+        adjusted, diag = controller.apply(
+            target_weights=np.array([0.80, 0.0, 0.20], dtype=np.float32),
+            current_weights=np.array([0.0, 0.0, 1.0], dtype=np.float32),
+            prices={"BTCUSDT": 100.0, "ETHUSDT": 50.0},
+            feature_state={"BTCUSDT": frame, "ETHUSDT": frame.copy()},
+            nav=100.0,
+        )
+        self.assertAlmostEqual(float(adjusted[0]), 0.35, places=6)
+        self.assertAlmostEqual(float(adjusted[2]), 0.65, places=6)
+        self.assertAlmostEqual(float(diag["dynamic_max_asset_weight"]), 0.35, places=6)
 
     def test_live_session_artifacts_are_created(self):
         with TemporaryDirectory() as tmp:

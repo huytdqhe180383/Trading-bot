@@ -31,7 +31,7 @@ API (`torch.cuda`). In this repo, `device="cuda"` or `device="cuda:0"` means
 flowchart LR
   raw["data/raw OHLCV parquet"] --> prep["data/preprocess.py<br/>MTF features"]
   raw --> kronos_windows["data/kronos_windows.py<br/>raw OHLCV slices"]
-  prep --> env["BinanceSpotEnv<br/>RL observation + risk governor"]
+  prep --> env["SpotPortfolioEnv<br/>RL observation + risk governor"]
   env --> rl["PPO/SAC ensemble<br/>models/PPO + models/SAC"]
   kronos_windows --> kronos["KronosAdapter<br/>external/Kronos + HF model"]
   rocm["ROCm PyTorch<br/>torch.cuda -> HIP -> RX 6700 XT"] --> rl

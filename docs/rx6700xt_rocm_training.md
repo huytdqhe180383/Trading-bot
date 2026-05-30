@@ -184,7 +184,7 @@ The project requirements can accidentally replace the custom wheel. Install
 everything except `torch`, `torchvision`, and `torchaudio` first:
 
 ```powershell
-pip install stable-baselines3 sb3-contrib numpy==1.26.4 pandas scipy gymnasium matplotlib seaborn python-dotenv requests tqdm loguru ccxt binance-connector empyrical pyfolio-reloaded
+pip install stable-baselines3 sb3-contrib numpy==1.26.4 pandas scipy gymnasium matplotlib seaborn python-dotenv requests tqdm loguru ccxt empyrical pyfolio-reloaded
 ```
 
 Then run:

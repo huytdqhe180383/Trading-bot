@@ -68,11 +68,29 @@ from config import (
     TRADINGAGENTS_PROVIDER_FALLBACKS,
     TRADINGAGENTS_RETRY_BACKOFF_SECS,
     MIN_CASH_FLOOR,
+    POSITION_CAP_MODE,
+    NAV_SCALED_CAP_MIN_NAV,
+    NAV_SCALED_CAP_MAX_NAV,
+    NAV_SCALED_CAP_MIN_WEIGHT,
 )
 from data.live_feed import CCXTExchangeGateway
-from risk.risk_constraints import apply_stress_risk_governor
+from risk.risk_constraints import (
+    apply_position_cap_mode,
+    apply_stress_risk_governor,
+    compute_nav_scaled_max_asset_weight as _compute_nav_scaled_max_asset_weight,
+)
 
 load_dotenv()
+
+
+def compute_nav_scaled_max_asset_weight(nav: float) -> float:
+    return _compute_nav_scaled_max_asset_weight(
+        nav,
+        min_nav=float(NAV_SCALED_CAP_MIN_NAV),
+        max_nav=float(NAV_SCALED_CAP_MAX_NAV),
+        min_weight=float(NAV_SCALED_CAP_MIN_WEIGHT),
+        max_weight=float(MAX_ASSET_WEIGHT),
+    )
 
 
 def create_live_session_dir(results_dir: Path = RESULTS_DIR, *, run_date: str | None = None) -> Path:
@@ -266,6 +284,16 @@ class LiveExecutionController:
         self.peak_nav = nav if self.peak_nav is None else max(self.peak_nav, nav)
         regime = infer_market_regime(feature_state, nav=nav, peak_nav=self.peak_nav)
         requested = self._normalize_weights(target_weights)
+        requested, dynamic_max_asset_weight = apply_position_cap_mode(
+            weights=requested,
+            n_assets=len(SYMBOLS),
+            nav=float(nav),
+            position_cap_mode=POSITION_CAP_MODE,
+            base_max_asset_weight=float(MAX_ASSET_WEIGHT),
+            nav_scaled_cap_min_nav=float(NAV_SCALED_CAP_MIN_NAV),
+            nav_scaled_cap_max_nav=float(NAV_SCALED_CAP_MAX_NAV),
+            nav_scaled_cap_min_weight=float(NAV_SCALED_CAP_MIN_WEIGHT),
+        )
 
         governed, governor_diag = apply_stress_risk_governor(
             weights=requested,
@@ -393,6 +421,7 @@ class LiveExecutionController:
             "risk_governor_reason": str(governor_diag.get("reason", "")),
             "risk_governor_cash_floor": float(governor_diag.get("cash_floor", 0.0)),
             "risk_governor_max_risk_on": float(governor_diag.get("max_risk_on", 0.0)),
+            "dynamic_max_asset_weight": float(dynamic_max_asset_weight),
         }
         return adjusted.astype(np.float32), diag
 
@@ -451,7 +480,7 @@ def evaluate_safety_gates(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run live trading with RL + optional Kronos + TradingAgents fusion.")
-    parser.add_argument("--exchange", default=PRIMARY_EXCHANGE, choices=["okx", "binance"])
+    parser.add_argument("--exchange", default=PRIMARY_EXCHANGE, choices=["okx"])
     parser.add_argument("--mode", default="testnet", choices=["testnet", "live"])
     parser.add_argument("--model-dir", type=Path, default=LIVE_BASELINE_MODEL_DIR)
     parser.add_argument(

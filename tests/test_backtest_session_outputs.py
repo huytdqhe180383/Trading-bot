@@ -5,6 +5,10 @@ from pathlib import Path
 import pandas as pd
 
 from backtest import (
+    TRADE_PROFILES,
+    apply_trade_profile_overrides,
+    build_arg_parser,
+    build_benchmark_nav,
     build_trade_diagnostics_tables,
     create_backtest_session_dir,
     create_best_model_snapshot_dir,
@@ -15,6 +19,45 @@ from backtest import (
 
 
 class BacktestSessionOutputsTest(unittest.TestCase):
+    def test_build_arg_parser_accepts_custom_initial_capital(self):
+        parser = build_arg_parser()
+
+        args = parser.parse_args(["--initial-capital", "100"])
+
+        self.assertEqual(args.initial_capital, 100.0)
+
+    def test_build_arg_parser_accepts_trade_profile_and_position_cap_mode(self):
+        parser = build_arg_parser()
+
+        args = parser.parse_args(["--trade-profile", "aggressive", "--position-cap-mode", "smooth_nav"])
+
+        self.assertEqual(args.trade_profile, "aggressive")
+        self.assertEqual(args.position_cap_mode, "smooth_nav")
+
+    def test_apply_trade_profile_overrides_sets_expected_thresholds(self):
+        parser = build_arg_parser()
+        args = parser.parse_args(["--trade-profile", "moderate"])
+
+        apply_trade_profile_overrides(args)
+
+        self.assertEqual(args.rebalance_threshold_normal, TRADE_PROFILES["moderate"]["rebalance_threshold_normal"])
+        self.assertEqual(args.rebalance_threshold_stress, TRADE_PROFILES["moderate"]["rebalance_threshold_stress"])
+        self.assertEqual(args.rebalance_threshold_crisis, TRADE_PROFILES["moderate"]["rebalance_threshold_crisis"])
+        self.assertEqual(args.material_trade_threshold, TRADE_PROFILES["moderate"]["material_trade_threshold"])
+
+    def test_build_benchmark_nav_scales_with_initial_capital(self):
+        idx = pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC")
+        test_data = {
+            "BTCUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.1, -0.05]}, index=idx),
+            "ETHUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.05, -0.02]}, index=idx),
+        }
+
+        benchmark = build_benchmark_nav(test_data, initial_capital=100.0)
+
+        self.assertEqual(benchmark.name, "benchmark_nav")
+        self.assertEqual(benchmark.index.tolist(), idx.tolist())
+        self.assertAlmostEqual(float(benchmark.iloc[0]), 100.0, places=6)
+
     def test_create_backtest_session_dir_uses_daily_incrementing_number(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

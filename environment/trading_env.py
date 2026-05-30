@@ -2,7 +2,7 @@
 Strategy Layer â€“ FinRL-X Trading Environment
 =============================================
 A Gymnasium-compatible environment implementing a multi-asset
-spot portfolio for BTC and ETH on Binance.
+spot portfolio for BTC and ETH with a cash sleeve.
 
 Key design decisions:
   â€¢ Weight-centric action space (FinRL-X convention):
@@ -12,7 +12,7 @@ Key design decisions:
     for all symbols + portfolio state.
   â€¢ Reward = log portfolio return over one step, penalised by
     proportional transaction cost.
-  â€¢ Binance Spot â€“ no shorting allowed (weights clipped to [0, 1]).
+  â€¢ Spot-only portfolio â€“ no shorting allowed (weights clipped to [0, 1]).
 """
 
 import sys
@@ -43,8 +43,10 @@ from config import (
     RISK_GOVERNOR_DRAWDOWN_THRESHOLD, RISK_GOVERNOR_CRISIS_DRAWDOWN_THRESHOLD,
     RISK_GOVERNOR_STRESS_CASH_FLOOR, RISK_GOVERNOR_CRISIS_CASH_FLOOR,
     RISK_GOVERNOR_STRESS_MAX_RISK_ON, RISK_GOVERNOR_CRISIS_MAX_RISK_ON,
+    MAX_ASSET_WEIGHT, POSITION_CAP_MODE, NAV_SCALED_CAP_MIN_NAV,
+    NAV_SCALED_CAP_MAX_NAV, NAV_SCALED_CAP_MIN_WEIGHT,
 )
-from risk.risk_constraints import apply_stress_risk_governor
+from risk.risk_constraints import apply_position_cap_mode, apply_stress_risk_governor
 
 
 def _softmax_weights(action: np.ndarray) -> np.ndarray:
@@ -68,7 +70,7 @@ def _softmax_weights(action: np.ndarray) -> np.ndarray:
         
     return np.append(w, cash_w).astype(np.float32)
 
-class BinanceSpotEnv(gym.Env):
+class SpotPortfolioEnv(gym.Env):
     """
     Multi-asset Spot trading environment for BTC/ETH.
 
@@ -200,6 +202,7 @@ class BinanceSpotEnv(gym.Env):
             "effective_slippage": float(self.slippage),
             "volatility_proxy": 0.0,
         }
+        self._last_dynamic_max_asset_weight = float(MAX_ASSET_WEIGHT)
         self._bars_since_last_material_trade = max(int(MIN_HOLD_BARS), 0)
         self._last_material_trade_direction = np.zeros(self.n_assets, dtype=np.float32)
         self._position_reset_below_threshold_bars = np.zeros(self.n_assets, dtype=np.int32)
@@ -218,6 +221,10 @@ class BinanceSpotEnv(gym.Env):
             "position_reset_reason": "",
             "bars_since_last_material_trade": 0,
             "material_trade_executed": False,
+            "rebalance_blocked_by_min_notional": False,
+            "min_notional_blocked_count": 0,
+            "min_notional_blocked_assets": "",
+            "dynamic_max_asset_weight": float(MAX_ASSET_WEIGHT),
         }
         
         # Continuous Action Smoothing tracking
@@ -378,6 +385,42 @@ class BinanceSpotEnv(gym.Env):
         }
         return self._normalize_weights(adjusted), diag
 
+    def _apply_min_order_notional_filter(
+        self,
+        target_weights: np.ndarray,
+        *,
+        current_weights: np.ndarray,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        candidate = self._normalize_weights(target_weights)
+        current = self._normalize_weights(current_weights)
+        portfolio_value = float(max(self._portfolio, 0.0))
+        if portfolio_value <= 1e-9:
+            return candidate.astype(np.float32), {
+                "rebalance_blocked_by_min_notional": False,
+                "min_notional_blocked_count": 0,
+                "min_notional_blocked_assets": "",
+            }
+
+        current_notional = current[:-1] * portfolio_value
+        target_notional = candidate[:-1] * portfolio_value
+        adjusted_notional = target_notional.copy()
+        blocked_assets: list[str] = []
+
+        for idx, sym in enumerate(self.symbols):
+            delta_notional = abs(float(target_notional[idx] - current_notional[idx]))
+            if 1e-9 < delta_notional < float(MIN_ORDER_USDT):
+                adjusted_notional[idx] = current_notional[idx]
+                blocked_assets.append(sym)
+
+        cash_notional = max(portfolio_value - float(adjusted_notional.sum()), 0.0)
+        adjusted_weights = np.append(adjusted_notional / portfolio_value, cash_notional / portfolio_value)
+        adjusted = self._normalize_weights(adjusted_weights)
+        return adjusted.astype(np.float32), {
+            "rebalance_blocked_by_min_notional": bool(blocked_assets),
+            "min_notional_blocked_count": len(blocked_assets),
+            "min_notional_blocked_assets": ",".join(blocked_assets),
+        }
+
     def _softmax_weights(self, action: np.ndarray) -> np.ndarray:
         return _softmax_weights(action)
 
@@ -433,6 +476,20 @@ class BinanceSpotEnv(gym.Env):
         }
         return effective
 
+    def _apply_position_cap(self, weights: np.ndarray) -> np.ndarray:
+        capped, applied_cap = apply_position_cap_mode(
+            weights=weights,
+            n_assets=self.n_assets,
+            nav=float(self._portfolio),
+            position_cap_mode=POSITION_CAP_MODE,
+            base_max_asset_weight=float(MAX_ASSET_WEIGHT),
+            nav_scaled_cap_min_nav=float(NAV_SCALED_CAP_MIN_NAV),
+            nav_scaled_cap_max_nav=float(NAV_SCALED_CAP_MAX_NAV),
+            nav_scaled_cap_min_weight=float(NAV_SCALED_CAP_MIN_WEIGHT),
+        )
+        self._last_dynamic_max_asset_weight = float(applied_cap)
+        return capped.astype(np.float32)
+
     def _compute_transaction_cost(
         self, old_weights: np.ndarray, new_weights: np.ndarray
     ) -> float:
@@ -441,15 +498,15 @@ class BinanceSpotEnv(gym.Env):
 
         Improvements over the original:
           â€¢ Fee is applied only where the USDT notional traded for an asset
-            meets or exceeds MIN_ORDER_USDT (Binance rejects dust orders).
+            meets or exceeds MIN_ORDER_USDT (the live exchange would reject dust orders).
           â€¢ Old code applied fees on weight *fractions* without checking
             whether the underlying notional was tradeable; this caused
-            backtest to over-penalise tiny rebalances that Binance ignores.
+            backtest to over-penalise tiny rebalances that the live venue would ignore.
         """
         delta = np.abs(new_weights[:-1] - old_weights[:-1])
         # Notional traded per asset in USDT
         notional = delta * self._portfolio
-        # Suppress fee on dust trades that Binance would reject
+        # Suppress fee on dust trades that the live venue would reject
         tradeable = (notional >= MIN_ORDER_USDT).astype(np.float32)
         effective_delta = delta * tradeable
         return float(effective_delta.sum() * (self.fee + self._effective_slippage()))
@@ -599,6 +656,7 @@ class BinanceSpotEnv(gym.Env):
             new_weights = planned_weights.copy()
         else:
             new_weights = self._weights.copy()
+        new_weights = self._apply_position_cap(new_weights)
         new_weights = self._apply_stress_governor(new_weights)
         new_weights = self._apply_step_turnover_cap(new_weights)
             
@@ -631,6 +689,11 @@ class BinanceSpotEnv(gym.Env):
                     new_weights[-1] += new_weights[i]  # Send to cash
                     new_weights[i] = 0.0               # Force 0 position
                 self._asset_highest_prices[i] = self._asset_synthetic_prices[i]
+
+        new_weights, min_notional_diag = self._apply_min_order_notional_filter(
+            new_weights,
+            current_weights=old_weights,
+        )
 
         # Transaction cost (proportional to rebalance amount)
         tc = self._compute_transaction_cost(old_weights, new_weights)
@@ -682,6 +745,10 @@ class BinanceSpotEnv(gym.Env):
             "turnover_cap": self._last_turnover_cap_diag,
             "effective_slippage": self._last_cost_diag.get("effective_slippage", self.slippage),
             "slippage_volatility_proxy": self._last_cost_diag.get("volatility_proxy", 0.0),
+            "dynamic_max_asset_weight": self._last_dynamic_max_asset_weight,
+            "rebalance_blocked_by_min_notional": min_notional_diag["rebalance_blocked_by_min_notional"],
+            "min_notional_blocked_count": min_notional_diag["min_notional_blocked_count"],
+            "min_notional_blocked_assets": min_notional_diag["min_notional_blocked_assets"],
             **reward_components,
         }
 
@@ -734,6 +801,7 @@ class BinanceSpotEnv(gym.Env):
 
         old_weights = self._weights.copy()
         requested_weights = self._normalize_weights(target_weights)
+        requested_weights = self._apply_position_cap(requested_weights)
         governed_weights = self._apply_stress_governor(requested_weights)
         governor_forced = float(np.abs(governed_weights[:-1] - requested_weights[:-1]).sum()) > 1e-9
         new_weights, execution_diag = self._apply_execution_controls(
@@ -748,6 +816,11 @@ class BinanceSpotEnv(gym.Env):
             old_weights=old_weights,
             new_weights=new_weights,
             returns=returns,
+        )
+
+        new_weights, min_notional_diag = self._apply_min_order_notional_filter(
+            new_weights,
+            current_weights=old_weights,
         )
 
         tc = self._compute_transaction_cost(old_weights, new_weights)
@@ -801,6 +874,7 @@ class BinanceSpotEnv(gym.Env):
             "turnover_cap": self._last_turnover_cap_diag,
             "effective_slippage": self._last_cost_diag.get("effective_slippage", self.slippage),
             "slippage_volatility_proxy": self._last_cost_diag.get("volatility_proxy", 0.0),
+            "dynamic_max_asset_weight": self._last_dynamic_max_asset_weight,
             "requested_weight_delta": execution_diag["requested_weight_delta"],
             "executed_weight_delta": executed_delta,
             "rebalance_threshold": execution_diag["rebalance_threshold"],
@@ -816,6 +890,9 @@ class BinanceSpotEnv(gym.Env):
             "position_reset_reason": trailing_diag["position_reset_reason"],
             "bars_since_last_material_trade": self._bars_since_last_material_trade,
             "material_trade_executed": material_trade_executed,
+            "rebalance_blocked_by_min_notional": min_notional_diag["rebalance_blocked_by_min_notional"],
+            "min_notional_blocked_count": min_notional_diag["min_notional_blocked_count"],
+            "min_notional_blocked_assets": min_notional_diag["min_notional_blocked_assets"],
             **reward_components,
         }
         self._last_execution_diag = {
@@ -827,8 +904,14 @@ class BinanceSpotEnv(gym.Env):
             "position_reset_reason": trailing_diag["position_reset_reason"],
             "bars_since_last_material_trade": self._bars_since_last_material_trade,
             "material_trade_executed": material_trade_executed,
+            "rebalance_blocked_by_min_notional": min_notional_diag["rebalance_blocked_by_min_notional"],
+            "min_notional_blocked_count": min_notional_diag["min_notional_blocked_count"],
+            "min_notional_blocked_assets": min_notional_diag["min_notional_blocked_assets"],
         }
 
         self._step_idx += 1
         obs = self._get_obs()
         return obs, reward, terminated, False, info
+
+
+BinanceSpotEnv = SpotPortfolioEnv

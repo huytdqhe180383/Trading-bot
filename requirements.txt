@@ -12,9 +12,8 @@ pandas>=2.1.0
 pandas-ta>=0.3.14b          # Technical indicators (RSI, MACD, BBands, etc.)
 scipy>=1.11.0
 
-# Binance Exchange Connectivity
-binance-connector>=3.11.0   # Official Binance connector (latest, 2026-compatible)
-ccxt>=4.4.0                 # Fallback / multi-exchange unified wrapper
+# Exchange Connectivity
+ccxt>=4.4.0                 # Canonical OKX-first unified exchange wrapper
 
 # Environment Validation
 gymnasium>=0.29.0            # FinRL-X uses Gymnasium (modern OpenAI Gym fork)

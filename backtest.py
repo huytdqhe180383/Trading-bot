@@ -59,6 +59,7 @@ from config import (
     REBALANCE_THRESHOLD_NORMAL,
     REBALANCE_THRESHOLD_STRESS,
     REVERSAL_HYSTERESIS_MULT,
+    POSITION_CAP_MODE,
     RAW_DATA_DIR,
     RESULTS_DIR,
     SYMBOLS,
@@ -70,7 +71,7 @@ from config import (
     TRADINGAGENTS_PROVIDER_FALLBACKS,
     TRADINGAGENTS_RETRY_BACKOFF_SECS,
 )
-from environment.trading_env import BinanceSpotEnv, _softmax_weights
+from environment.trading_env import SpotPortfolioEnv, _softmax_weights
 import environment.trading_env as trading_env_module
 from metrics.performance import (
     compute_metrics,
@@ -107,6 +108,28 @@ REALISM = {
 ENSEMBLE_METHODS = ["mean", "voting", "weighted", "dynamic_weighted", "regime_weighted", "imca"]
 DEFAULT_COMPARISON_METHODS = ["mean", "weighted", "dynamic_weighted", "regime_weighted"]
 POST_POLICY_OVERLAYS = ["none", "champion_guard"]
+POSITION_CAP_MODES = ["fixed", "smooth_nav"]
+TRADE_PROFILES = {
+    "none": {},
+    "mild": {
+        "rebalance_threshold_normal": 0.025,
+        "rebalance_threshold_stress": 0.045,
+        "rebalance_threshold_crisis": 0.075,
+        "material_trade_threshold": 0.045,
+    },
+    "moderate": {
+        "rebalance_threshold_normal": 0.020,
+        "rebalance_threshold_stress": 0.040,
+        "rebalance_threshold_crisis": 0.070,
+        "material_trade_threshold": 0.040,
+    },
+    "aggressive": {
+        "rebalance_threshold_normal": 0.015,
+        "rebalance_threshold_stress": 0.030,
+        "rebalance_threshold_crisis": 0.060,
+        "material_trade_threshold": 0.035,
+    },
+}
 
 
 def create_backtest_session_dir(results_dir: Path = RESULTS_DIR, *, run_date: str | None = None) -> Path:
@@ -141,6 +164,56 @@ def create_best_model_snapshot_dir(models_dir: Path = MODELS_DIR, *, run_date: s
     return session_dir
 
 
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run backtest with Kronos/TradingAgents fusion and realism controls.")
+    parser.add_argument(
+        "--method",
+        default=ENSEMBLE_METHOD,
+        choices=ENSEMBLE_METHODS,
+    )
+    parser.add_argument("--pipeline", default="rl_full", choices=list(PIPELINES.keys()))
+    parser.add_argument("--realism-profile", default="live_like", choices=list(REALISM.keys()))
+    parser.add_argument("--run-matrix", action="store_true", help="Run all ablation pipelines for the selected realism profile.")
+    parser.add_argument("--diagnose-realism", action="store_true", help="Run RL-only baseline and live_like profiles and save realism report.")
+    parser.add_argument(
+        "--compare-ensemble-methods",
+        action="store_true",
+        help="Compare ensemble aggregation methods for the selected pipeline.",
+    )
+    parser.add_argument(
+        "--comparison-methods",
+        default=DEFAULT_COMPARISON_METHODS,
+        type=parse_method_list,
+        help="Comma-separated methods for --compare-ensemble-methods.",
+    )
+    parser.add_argument("--model-dir", type=Path, default=LIVE_BASELINE_MODEL_DIR, help="Model directory to load PPO/SAC checkpoints from.")
+    parser.add_argument("--trade-profile", default="none", choices=list(TRADE_PROFILES.keys()))
+    parser.add_argument("--position-cap-mode", default=POSITION_CAP_MODE, choices=POSITION_CAP_MODES)
+    parser.add_argument(
+        "--post-policy-overlay",
+        type=parse_overlay_name,
+        default="none",
+        help="Optional deterministic overlay applied after RL/fusion target weights.",
+    )
+    parser.add_argument("--initial-capital", type=float, default=INITIAL_CAPITAL, help="Starting portfolio cash in USD for the backtest.")
+    parser.add_argument("--overlay-target-volatility", type=float, default=0.04)
+    parser.add_argument("--overlay-persistence-turnover-cap", type=float, default=0.15)
+    parser.add_argument("--overlay-trend-gate-threshold", type=float, default=0.0)
+    parser.add_argument("--overlay-trend-gate-multiplier", type=float, default=0.75)
+    parser.add_argument("--overlay-drawdown-gate-threshold", type=float, default=-0.10)
+    parser.add_argument("--overlay-drawdown-gate-multiplier", type=float, default=0.70)
+    parser.add_argument("--rebalance-threshold-normal", type=float, default=REBALANCE_THRESHOLD_NORMAL)
+    parser.add_argument("--rebalance-threshold-stress", type=float, default=REBALANCE_THRESHOLD_STRESS)
+    parser.add_argument("--rebalance-threshold-crisis", type=float, default=REBALANCE_THRESHOLD_CRISIS)
+    parser.add_argument("--min-hold-bars", type=int, default=MIN_HOLD_BARS)
+    parser.add_argument("--material-trade-threshold", type=float, default=MATERIAL_TRADE_THRESHOLD)
+    parser.add_argument("--reversal-hysteresis-mult", type=float, default=REVERSAL_HYSTERESIS_MULT)
+    parser.add_argument("--position-reset-weight-threshold", type=float, default=POSITION_RESET_WEIGHT_THRESHOLD)
+    parser.add_argument("--position-reset-persist-bars", type=int, default=POSITION_RESET_PERSIST_BARS)
+    parser.add_argument("--autosave-profit-threshold", type=float, default=70.0)
+    return parser
+
+
 def parse_method_list(raw: str) -> list[str]:
     methods = [item.strip() for item in raw.split(",") if item.strip()]
     invalid = sorted(set(methods).difference(ENSEMBLE_METHODS))
@@ -165,6 +238,12 @@ def resolve_backtest_model_dir(model_dir: Path | None = None) -> Path:
     return MODELS_DIR
 
 
+def apply_trade_profile_overrides(args: argparse.Namespace) -> None:
+    profile = TRADE_PROFILES.get(str(args.trade_profile), {})
+    for field, value in profile.items():
+        setattr(args, field, value)
+
+
 def apply_execution_control_overrides(args: argparse.Namespace) -> None:
     trading_env_module.REBALANCE_THRESHOLD_NORMAL = float(args.rebalance_threshold_normal)
     trading_env_module.REBALANCE_THRESHOLD_STRESS = float(args.rebalance_threshold_stress)
@@ -174,12 +253,13 @@ def apply_execution_control_overrides(args: argparse.Namespace) -> None:
     trading_env_module.REVERSAL_HYSTERESIS_MULT = float(args.reversal_hysteresis_mult)
     trading_env_module.POSITION_RESET_WEIGHT_THRESHOLD = float(args.position_reset_weight_threshold)
     trading_env_module.POSITION_RESET_PERSIST_BARS = int(args.position_reset_persist_bars)
+    trading_env_module.POSITION_CAP_MODE = str(args.position_cap_mode)
 
 
 def _apply_named_post_policy_overlay(
     *,
     overlay_name: str,
-    env: BinanceSpotEnv,
+    env: SpotPortfolioEnv,
     target_weights: np.ndarray,
     current_weights: np.ndarray,
     target_volatility: float,
@@ -265,6 +345,10 @@ def write_trade_decision_log(episode_df: pd.DataFrame, output_path: Path) -> Non
         "rebalance_blocked_by_deadband",
         "rebalance_blocked_by_cooldown",
         "rebalance_blocked_by_hysteresis",
+        "rebalance_blocked_by_min_notional",
+        "min_notional_blocked_count",
+        "min_notional_blocked_assets",
+        "dynamic_max_asset_weight",
         "rebalance_forced_by_governor",
         "rebalance_forced_by_trailing_stop",
         "trailing_stop_liquidation_count",
@@ -539,9 +623,9 @@ def load_kronos_raw_data() -> dict[str, pd.DataFrame]:
     )
 
 
-def build_benchmark_nav(test_data: dict[str, pd.DataFrame]) -> pd.Series:
+def build_benchmark_nav(test_data: dict[str, pd.DataFrame], *, initial_capital: float = INITIAL_CAPITAL) -> pd.Series:
     bench_returns = np.mean([np.exp(test_data[s]["log_return_1h"].cumsum()) for s in SYMBOLS], axis=0)
-    return pd.Series(bench_returns * INITIAL_CAPITAL, index=test_data[SYMBOLS[0]].index, name="benchmark_nav")
+    return pd.Series(bench_returns * initial_capital, index=test_data[SYMBOLS[0]].index, name="benchmark_nav")
 
 
 def _print_metrics(label: str, metrics: dict[str, float]) -> None:
@@ -634,7 +718,7 @@ def _update_adaptive_ensemble_weights(
     *,
     method: str,
     agent: EnsembleAgent,
-    env: BinanceSpotEnv,
+    env: SpotPortfolioEnv,
     returns_history: dict[str, deque],
 ) -> None:
     if method == "dynamic_weighted":
@@ -698,11 +782,12 @@ def run_backtest(
     overlay_trend_gate_multiplier: float = 0.75,
     overlay_drawdown_gate_threshold: float = -0.10,
     overlay_drawdown_gate_multiplier: float = 0.70,
+    initial_capital: float = INITIAL_CAPITAL,
 ) -> tuple[pd.DataFrame, int, dict[str, Any]]:
     profile = REALISM[realism_profile]
-    env = BinanceSpotEnv(
+    env = SpotPortfolioEnv(
         test_data,
-        initial_capital=INITIAL_CAPITAL,
+        initial_capital=initial_capital,
         trading_fee=profile["fee"],
         slippage=profile["slippage"],
         mode="eval",
@@ -890,6 +975,10 @@ def run_backtest(
             "rebalance_blocked_by_deadband": bool(info.get("rebalance_blocked_by_deadband", False)),
             "rebalance_blocked_by_cooldown": bool(info.get("rebalance_blocked_by_cooldown", False)),
             "rebalance_blocked_by_hysteresis": bool(info.get("rebalance_blocked_by_hysteresis", False)),
+            "rebalance_blocked_by_min_notional": bool(info.get("rebalance_blocked_by_min_notional", False)),
+            "min_notional_blocked_count": int(info.get("min_notional_blocked_count", 0)),
+            "min_notional_blocked_assets": info.get("min_notional_blocked_assets", ""),
+            "dynamic_max_asset_weight": info.get("dynamic_max_asset_weight", np.nan),
             "rebalance_forced_by_governor": bool(info.get("rebalance_forced_by_governor", False)),
             "rebalance_forced_by_trailing_stop": bool(info.get("rebalance_forced_by_trailing_stop", False)),
             "trailing_stop_liquidation_count": int(info.get("trailing_stop_liquidation_count", 0)),
@@ -1009,6 +1098,7 @@ def run_backtest(
         "latency_steps": latency_steps,
         "model_dir": str(model_dir),
         "post_policy_overlay": post_policy_overlay,
+        "initial_capital": float(initial_capital),
     }
     return df, trades_count, meta
 
@@ -1028,8 +1118,9 @@ def run_matrix(
     overlay_trend_gate_multiplier: float = 0.75,
     overlay_drawdown_gate_threshold: float = -0.10,
     overlay_drawdown_gate_multiplier: float = 0.70,
+    initial_capital: float = INITIAL_CAPITAL,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    benchmark = build_benchmark_nav(test_data)
+    benchmark = build_benchmark_nav(test_data, initial_capital=initial_capital)
     matrix_rows: list[dict[str, Any]] = []
     realism_rows: list[dict[str, Any]] = []
 
@@ -1051,11 +1142,12 @@ def run_matrix(
             overlay_trend_gate_multiplier=overlay_trend_gate_multiplier,
             overlay_drawdown_gate_threshold=overlay_drawdown_gate_threshold,
             overlay_drawdown_gate_multiplier=overlay_drawdown_gate_multiplier,
+            initial_capital=initial_capital,
         )
 
         metrics = compute_metrics(
             episode_df["portfolio_value"],
-            initial_capital=INITIAL_CAPITAL,
+            initial_capital=initial_capital,
             benchmark_nav=benchmark,
             trades_count=trades_count,
         )
@@ -1155,8 +1247,9 @@ def run_ensemble_method_comparison(
     overlay_trend_gate_multiplier: float = 0.75,
     overlay_drawdown_gate_threshold: float = -0.10,
     overlay_drawdown_gate_multiplier: float = 0.70,
+    initial_capital: float = INITIAL_CAPITAL,
 ) -> pd.DataFrame:
-    benchmark = build_benchmark_nav(test_data)
+    benchmark = build_benchmark_nav(test_data, initial_capital=initial_capital)
     rows: list[dict[str, Any]] = []
     equity_curves: dict[str, pd.Series] = {}
     for method in methods:
@@ -1174,6 +1267,7 @@ def run_ensemble_method_comparison(
             overlay_trend_gate_multiplier=overlay_trend_gate_multiplier,
             overlay_drawdown_gate_threshold=overlay_drawdown_gate_threshold,
             overlay_drawdown_gate_multiplier=overlay_drawdown_gate_multiplier,
+            initial_capital=initial_capital,
         )
         equity_curves[method] = episode_df["portfolio_value"].copy()
         episode_df.to_parquet(output_dir / f"backtest_episode_{pipeline}_{realism_profile}_{method}.parquet")
@@ -1188,7 +1282,7 @@ def run_ensemble_method_comparison(
         )
         metrics = compute_metrics(
             episode_df["portfolio_value"],
-            initial_capital=INITIAL_CAPITAL,
+            initial_capital=initial_capital,
             benchmark_nav=benchmark,
             trades_count=trades_count,
         )
@@ -1208,56 +1302,15 @@ def run_ensemble_method_comparison(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run backtest with Kronos/TradingAgents fusion and realism controls.")
-    parser.add_argument(
-        "--method",
-        default=ENSEMBLE_METHOD,
-        choices=ENSEMBLE_METHODS,
-    )
-    parser.add_argument("--pipeline", default="rl_full", choices=list(PIPELINES.keys()))
-    parser.add_argument("--realism-profile", default="live_like", choices=list(REALISM.keys()))
-    parser.add_argument("--run-matrix", action="store_true", help="Run all ablation pipelines for the selected realism profile.")
-    parser.add_argument("--diagnose-realism", action="store_true", help="Run RL-only baseline and live_like profiles and save realism report.")
-    parser.add_argument(
-        "--compare-ensemble-methods",
-        action="store_true",
-        help="Compare ensemble aggregation methods for the selected pipeline.",
-    )
-    parser.add_argument(
-        "--comparison-methods",
-        default=DEFAULT_COMPARISON_METHODS,
-        type=parse_method_list,
-        help="Comma-separated methods for --compare-ensemble-methods.",
-    )
-    parser.add_argument("--model-dir", type=Path, default=LIVE_BASELINE_MODEL_DIR, help="Model directory to load PPO/SAC checkpoints from.")
-    parser.add_argument(
-        "--post-policy-overlay",
-        type=parse_overlay_name,
-        default="none",
-        help="Optional deterministic overlay applied after RL/fusion target weights.",
-    )
-    parser.add_argument("--overlay-target-volatility", type=float, default=0.04)
-    parser.add_argument("--overlay-persistence-turnover-cap", type=float, default=0.15)
-    parser.add_argument("--overlay-trend-gate-threshold", type=float, default=0.0)
-    parser.add_argument("--overlay-trend-gate-multiplier", type=float, default=0.75)
-    parser.add_argument("--overlay-drawdown-gate-threshold", type=float, default=-0.10)
-    parser.add_argument("--overlay-drawdown-gate-multiplier", type=float, default=0.70)
-    parser.add_argument("--rebalance-threshold-normal", type=float, default=REBALANCE_THRESHOLD_NORMAL)
-    parser.add_argument("--rebalance-threshold-stress", type=float, default=REBALANCE_THRESHOLD_STRESS)
-    parser.add_argument("--rebalance-threshold-crisis", type=float, default=REBALANCE_THRESHOLD_CRISIS)
-    parser.add_argument("--min-hold-bars", type=int, default=MIN_HOLD_BARS)
-    parser.add_argument("--material-trade-threshold", type=float, default=MATERIAL_TRADE_THRESHOLD)
-    parser.add_argument("--reversal-hysteresis-mult", type=float, default=REVERSAL_HYSTERESIS_MULT)
-    parser.add_argument("--position-reset-weight-threshold", type=float, default=POSITION_RESET_WEIGHT_THRESHOLD)
-    parser.add_argument("--position-reset-persist-bars", type=int, default=POSITION_RESET_PERSIST_BARS)
-    parser.add_argument("--autosave-profit-threshold", type=float, default=70.0)
+    parser = build_arg_parser()
     args = parser.parse_args()
     args.model_dir = resolve_backtest_model_dir(args.model_dir)
+    apply_trade_profile_overrides(args)
     apply_execution_control_overrides(args)
 
     test_data = load_test_data()
     raw_ohlcv_data = load_kronos_raw_data()
-    benchmark = build_benchmark_nav(test_data)
+    benchmark = build_benchmark_nav(test_data, initial_capital=args.initial_capital)
     session_dir = create_backtest_session_dir(RESULTS_DIR)
     write_session_metadata(
         session_dir,
@@ -1271,7 +1324,10 @@ def main() -> None:
             "diagnose_realism": args.diagnose_realism,
             "compare_ensemble_methods": args.compare_ensemble_methods,
             "model_dir": args.model_dir,
+            "trade_profile": args.trade_profile,
+            "position_cap_mode": args.position_cap_mode,
             "post_policy_overlay": args.post_policy_overlay,
+            "initial_capital": args.initial_capital,
             "rebalance_threshold_normal": args.rebalance_threshold_normal,
             "rebalance_threshold_stress": args.rebalance_threshold_stress,
             "rebalance_threshold_crisis": args.rebalance_threshold_crisis,
@@ -1299,6 +1355,7 @@ def main() -> None:
             overlay_trend_gate_multiplier=args.overlay_trend_gate_multiplier,
             overlay_drawdown_gate_threshold=args.overlay_drawdown_gate_threshold,
             overlay_drawdown_gate_multiplier=args.overlay_drawdown_gate_multiplier,
+            initial_capital=args.initial_capital,
         )
         if not matrix_df.empty:
             best_row = matrix_df.sort_values("total_return_pct", ascending=False).iloc[0].to_dict()
@@ -1329,6 +1386,7 @@ def main() -> None:
             overlay_trend_gate_multiplier=args.overlay_trend_gate_multiplier,
             overlay_drawdown_gate_threshold=args.overlay_drawdown_gate_threshold,
             overlay_drawdown_gate_multiplier=args.overlay_drawdown_gate_multiplier,
+            initial_capital=args.initial_capital,
         )
         if not comparison_df.empty:
             best_row = comparison_df.sort_values("total_return_pct", ascending=False).iloc[0].to_dict()
@@ -1363,10 +1421,11 @@ def main() -> None:
                 overlay_trend_gate_multiplier=args.overlay_trend_gate_multiplier,
                 overlay_drawdown_gate_threshold=args.overlay_drawdown_gate_threshold,
                 overlay_drawdown_gate_multiplier=args.overlay_drawdown_gate_multiplier,
+                initial_capital=args.initial_capital,
             )
             metrics = compute_metrics(
                 episode_df["portfolio_value"],
-                initial_capital=INITIAL_CAPITAL,
+                initial_capital=args.initial_capital,
                 benchmark_nav=benchmark,
                 trades_count=trades_count,
             )
@@ -1414,10 +1473,11 @@ def main() -> None:
         overlay_trend_gate_multiplier=args.overlay_trend_gate_multiplier,
         overlay_drawdown_gate_threshold=args.overlay_drawdown_gate_threshold,
         overlay_drawdown_gate_multiplier=args.overlay_drawdown_gate_multiplier,
+        initial_capital=args.initial_capital,
     )
     metrics = compute_metrics(
         episode_df["portfolio_value"],
-        initial_capital=INITIAL_CAPITAL,
+        initial_capital=args.initial_capital,
         benchmark_nav=benchmark,
         trades_count=trades_count,
     )
