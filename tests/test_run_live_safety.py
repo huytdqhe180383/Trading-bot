@@ -15,6 +15,7 @@ from scripts.run_live import (
     create_live_session_dir,
     evaluate_safety_gates,
     has_exchange_credentials,
+    infer_obs_dim_from_ensemble,
     latest_market_timestamp,
     resolve_live_model_dir,
     write_live_session_metadata,
@@ -56,6 +57,16 @@ class RunLiveSafetyTest(unittest.TestCase):
         current = np.array([0.4, 0.3, 0.3], dtype=np.float32)
         target = np.array([0.55, 0.2, 0.25], dtype=np.float32)
         self.assertAlmostEqual(compute_turnover(current, target), 0.25, places=6)
+
+    def test_infer_obs_dim_from_ensemble_uses_loaded_model_space(self):
+        class DummyObsSpace:
+            shape = (123,)
+
+        class DummyModel:
+            observation_space = DummyObsSpace()
+
+        obs_dim = infer_obs_dim_from_ensemble({"PPO": DummyModel()})
+        self.assertEqual(obs_dim, 123)
 
     def test_resolve_live_model_dir_prefers_live_baseline_when_complete(self):
         with TemporaryDirectory() as tmp:

@@ -701,7 +701,7 @@ Use these commands:
 ### Service logs
 
 ```bash
-journalctl -u trading-bot -f
+sudo journalctl -u trading-bot -f
 ```
 
 ### App stdout log
@@ -721,6 +721,48 @@ tail -f /home/deploy/trading-bot/logs/live_stderr.log
 ```bash
 find /home/deploy/trading-bot/results/daily -maxdepth 3 -type f | tail -n 30
 ```
+
+### Friendlier monitor view
+
+This repo includes a simple server-side monitor helper:
+
+```bash
+chmod +x /home/deploy/trading-bot/scripts/server/live_monitor.sh
+/home/deploy/trading-bot/scripts/server/live_monitor.sh
+```
+
+Auto-refresh mode:
+
+```bash
+/home/deploy/trading-bot/scripts/server/live_monitor.sh --follow
+```
+
+It shows:
+
+- `systemd` status
+- memory and disk
+- latest live session summary
+- recent decision rows
+- stderr tail
+
+This is much easier for daily checks than manually typing multiple commands.
+
+### Optional: remove the `journalctl` permission warning
+
+The warning means your `deploy` user cannot read the full system journal without `sudo`.
+
+Simplest path:
+
+- keep using `sudo journalctl ...`
+
+If you want `deploy` to read journals without `sudo`, run once:
+
+```bash
+sudo usermod -aG adm deploy
+sudo usermod -aG systemd-journal deploy
+```
+
+Then fully log out and log back in.
 
 ---
 
@@ -994,7 +1036,7 @@ Use this as the short version.
 - upload `.env`
 - upload `models/live_baseline`
 - create `.venv`
-- `pip install -r requirements.txt`
+- `pip install -r requirements-live.txt`
 - run dry run
 - run short OKX testnet check
 - create `systemd` service
