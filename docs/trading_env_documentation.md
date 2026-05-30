@@ -1,9 +1,9 @@
 # FinRL-X Trading Environment Documentation
 
-Here is a detailed breakdown of the FinRL-X Trading Environment's structure, specifically focusing on its action space, environment observations, and the reward system designed for Binance multi-asset spot trading.
+Here is a detailed breakdown of the FinRL-X Trading Environment's structure, specifically focusing on its action space, environment observations, and the reward system designed for generic BTC/ETH/USDT spot portfolio trading.
 
 ## High-Level Summary
-The `BinanceSpotEnv` is a custom `gymnasium` environment designed to train Reinforcement Learning agents for multi-asset spot trading (BTC and ETH) alongside a cash (USDT) buffer. Instead of discrete buy/sell units, the agent outputs continuous portfolio weight allocations for each step. 
+The `SpotPortfolioEnv` is a custom `gymnasium` environment designed to train Reinforcement Learning agents for multi-asset spot trading (BTC and ETH) alongside a cash (USDT) buffer. Instead of discrete buy/sell units, the agent outputs continuous portfolio weight allocations for each step. 
 
 The environment tackles several common RL trading pitfalls (turtling, hyperactive trading, and catastrophic drawdowns) via hardcoded action smoothing, deadband filtering, synthetic trailing stops, and a multi-objective reward structure.
 

@@ -11,7 +11,7 @@ from data.live_feed import CCXTExchangeGateway
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check exchange balances and latest prices.")
-    parser.add_argument("--exchange", default="okx", choices=["okx", "binance"])
+    parser.add_argument("--exchange", default="okx", choices=["okx"])
     parser.add_argument("--mode", default="testnet", choices=["testnet", "live"])
     args = parser.parse_args()
 

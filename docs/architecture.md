@@ -24,7 +24,7 @@ flowchart LR
   prep --> train_data["Chronological training slice"]
   prep --> test_data["Reserved test/backtest slice"]
 
-  train_data --> env_train["BinanceSpotEnv\nlegacy class name, spot weights"]
+  train_data --> env_train["SpotPortfolioEnv\ngeneric BTC/ETH/USDT spot weights"]
   env_train --> trainer["train.py\nPPO 200k + SAC 50k"]
   trainer --> ppo["models/PPO/ppo_best.zip"]
   trainer --> sac["models/SAC/sac_best.zip"]
@@ -50,8 +50,8 @@ flowchart LR
   the configured exchange stack.
 - `data/preprocess.py`: creates multi-timeframe feature parquet files with
   shifted higher-timeframe joins to reduce look-ahead leakage.
-- `environment/trading_env.py`: defines `BinanceSpotEnv`; the name is legacy,
-  but the environment models a generic BTC/ETH/USDT spot portfolio.
+- `environment/trading_env.py`: defines `SpotPortfolioEnv`, a generic
+  BTC/ETH/USDT spot portfolio environment used by training and backtesting.
 - `train.py`: trains PPO/SAC, supports resume, deterministic seed plumbing, and
   chronological validation splitting.
 - `agents/ensemble_agent.py`: combines PPO/SAC proposals. `dynamic_weighted` is
