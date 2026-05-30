@@ -70,7 +70,6 @@ from config import (
     MIN_CASH_FLOOR,
 )
 from data.live_feed import CCXTExchangeGateway
-from environment.trading_env import BinanceSpotEnv
 from risk.risk_constraints import apply_stress_risk_governor
 
 load_dotenv()
@@ -191,6 +190,17 @@ def resolve_live_model_dir(model_dir: Path | None = None) -> Path:
     if (candidate / "PPO" / "ppo_best.zip").exists() and (candidate / "SAC" / "sac_best.zip").exists():
         return candidate
     return MODELS_DIR
+
+
+def infer_obs_dim_from_ensemble(ensemble: dict[str, Any]) -> int:
+    if not ensemble:
+        raise ValueError("Cannot infer observation dimension from an empty ensemble.")
+    for model in ensemble.values():
+        obs_space = getattr(model, "observation_space", None)
+        shape = getattr(obs_space, "shape", None)
+        if shape and len(shape) == 1 and int(shape[0]) > 0:
+            return int(shape[0])
+    raise ValueError("Unable to infer observation dimension from loaded models.")
 
 
 def has_exchange_credentials(exchange_id: str, mode: str) -> bool:
@@ -524,10 +534,7 @@ def main() -> None:
         min_cash_floor=MIN_CASH_FLOOR,
     )
 
-    local_data = {s: pd.read_parquet(Path("data/processed") / f"{s}_test.parquet") for s in SYMBOLS}
-    ref_env = BinanceSpotEnv(local_data, mode="eval")
-    obs_dim = ref_env.observation_space.shape[0]
-    ref_env.close()
+    obs_dim = infer_obs_dim_from_ensemble(ensemble)
 
     csv_log_path = LOGS_DIR / f"live_trades_{args.exchange}.csv"
     csv_log_path.parent.mkdir(parents=True, exist_ok=True)
