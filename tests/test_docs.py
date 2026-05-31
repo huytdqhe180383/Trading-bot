@@ -38,6 +38,19 @@ class ProjectDocumentationTest(unittest.TestCase):
             with self.subTest(term=term):
                 self.assertIn(term, guide)
 
+    def test_architecture_refactor_docs_exist(self):
+        required_paths = [
+            ROOT / "CONTEXT.md",
+            ROOT / "docs" / "README.md",
+            ROOT / "docs" / "architecture" / "runtime_spine.md",
+            ROOT / "docs" / "adr" / "0001-application-spine-and-artifact-runtime.md",
+            ROOT / "scripts" / "README.md",
+        ]
+
+        for path in required_paths:
+            with self.subTest(path=path):
+                self.assertTrue(path.exists(), f"Missing architecture navigation doc: {path}")
+
 
 if __name__ == "__main__":
     unittest.main()

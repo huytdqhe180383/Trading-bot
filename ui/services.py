@@ -26,7 +26,7 @@ from config import (
     UI_CONTROL_USE_SUDO,
     UI_TARGET_SERVICE,
 )
-from scripts.live_daily_report import load_live_decisions, summarize_frame
+from tradingbot.reports.live_daily import load_live_decisions, summarize_frame
 
 ALLOWED_CONTROL_ACTIONS = {"start", "stop", "restart", "status"}
 ALLOWED_LOG_SOURCES = {

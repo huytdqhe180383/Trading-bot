@@ -17,6 +17,9 @@ adapters/kronos_adapter.py      -> Kronos forecast adapter (fallback-safe)
 adapters/tradingagents_adapter.py -> TradingAgents adapter (fallback-safe)
 adapters/llm_risk_gate_adapter.py -> low-cadence local LLM risk gate (Ollama)
 agents/meta_fusion_agent.py     -> RL + overlays fusion (Kronos / TradingAgents / LLM risk gate)
+tradingbot/runtime/artifacts.py -> shared report/result session artifact helpers
+tradingbot/reports/live_daily.py -> compact live report builder used by CLI and UI
+tradingbot/apps/                -> stable lazy application entrypoints
 backtest.py                     -> ablations + realism profiles + reports
 scripts/run_live.py             -> canonical live/testnet execution runner
 run_live.py                     -> compatibility wrapper to scripts/run_live.py
@@ -253,6 +256,10 @@ Keep secrets, raw market data, model artifacts, and logs out of commits.
 
 ## documentation
 
+- `CONTEXT.md`
+- `docs/README.md`
+- `docs/architecture/runtime_spine.md`
+- `docs/adr/0001-application-spine-and-artifact-runtime.md`
 - `docs/project_comprehensive_report_and_integration_plan.md`
 - `docs/codebase_audit.md`
 - `docs/architecture.md`

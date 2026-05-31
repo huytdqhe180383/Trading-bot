@@ -5,7 +5,6 @@ Backtesting runner with Kronos/TradingAgents ablation matrix and realism profile
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 from collections import deque
 from datetime import datetime
@@ -80,6 +79,7 @@ from metrics.performance import (
 )
 from data.kronos_windows import load_raw_ohlcv_data, window_raw_ohlcv
 from risk.post_policy_overlay import apply_post_policy_overlay
+from tradingbot.runtime.artifacts import create_numbered_daily_dir, write_json_artifact
 
 load_dotenv()
 
@@ -111,18 +111,7 @@ POST_POLICY_OVERLAYS = ["none", "champion_guard"]
 
 def create_backtest_session_dir(results_dir: Path = RESULTS_DIR, *, run_date: str | None = None) -> Path:
     """Create results/daily/YYYY-MM-DD/N without overwriting prior sessions."""
-    day = run_date or datetime.now().strftime("%Y-%m-%d")
-    daily_dir = Path(results_dir) / "daily" / day
-    daily_dir.mkdir(parents=True, exist_ok=True)
-    existing_numbers = [
-        int(child.name)
-        for child in daily_dir.iterdir()
-        if child.is_dir() and child.name.isdigit()
-    ]
-    next_number = max(existing_numbers, default=0) + 1
-    session_dir = daily_dir / str(next_number)
-    session_dir.mkdir(parents=True, exist_ok=False)
-    return session_dir
+    return create_numbered_daily_dir(results_dir, run_date)
 
 
 def create_best_model_snapshot_dir(models_dir: Path = MODELS_DIR, *, run_date: str | None = None) -> Path:
@@ -219,14 +208,7 @@ def _apply_named_post_policy_overlay(
 
 
 def write_session_metadata(session_dir: Path, metadata: dict[str, Any]) -> None:
-    serializable = {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in metadata.items()
-    }
-    (session_dir / "session_metadata.json").write_text(
-        json.dumps(serializable, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    write_json_artifact(Path(session_dir) / "session_metadata.json", metadata)
 
 
 def write_trade_decision_log(episode_df: pd.DataFrame, output_path: Path) -> None:
@@ -515,10 +497,7 @@ def maybe_save_best_model_snapshot(
         "source_model_dir": str(source_model_dir),
         "source_session_dir": str(session_dir),
     }
-    (snapshot_dir / "snapshot_metadata.json").write_text(
-        json.dumps(metadata, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    write_json_artifact(snapshot_dir / "snapshot_metadata.json", metadata)
     logger.success(
         f"Saved best-model snapshot for {run_label} with return {total_return:.2f}% -> {snapshot_dir}"
     )
