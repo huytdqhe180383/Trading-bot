@@ -7,7 +7,7 @@ import pandas as pd
 import data.live_feed as live_feed
 import environment.trading_env as trading_env
 from data.live_feed import CCXTExchangeGateway
-from environment.trading_env import BinanceSpotEnv
+from environment.trading_env import SpotPortfolioEnv
 
 
 def _sample_data(rows: int = 64) -> dict[str, pd.DataFrame]:
@@ -26,7 +26,7 @@ def _sample_data(rows: int = 64) -> dict[str, pd.DataFrame]:
 
 class AuditHotfixTest(unittest.TestCase):
     def test_market_regime_and_reward_use_completed_bar_macro_trend(self):
-        env = BinanceSpotEnv(_sample_data(), lookback=30, mode="eval")
+        env = SpotPortfolioEnv(_sample_data(), lookback=30, mode="eval")
         env._step_idx = 30
         env._macro_trend_array[29] = 0.0
         env._macro_trend_array[30] = 1.0
@@ -84,7 +84,7 @@ class AuditHotfixTest(unittest.TestCase):
             data = _sample_data()
             for frame in data.values():
                 frame["log_return_1h"] = np.log(1.02)
-            env = BinanceSpotEnv(data, lookback=30, slippage=0.001, mode="eval")
+            env = SpotPortfolioEnv(data, lookback=30, slippage=0.001, mode="eval")
             env._step_idx = 40
 
             effective = env._effective_slippage()
@@ -102,7 +102,7 @@ class AuditHotfixTest(unittest.TestCase):
         try:
             trading_env.STEP_TURNOVER_CAP_ENABLED = True
             trading_env.STEP_TURNOVER_CAP_NORMAL = 0.20
-            env = BinanceSpotEnv(_sample_data(), lookback=30, mode="eval")
+            env = SpotPortfolioEnv(_sample_data(), lookback=30, mode="eval")
             env._weights = np.array([0.0, 0.0, 1.0], dtype=np.float32)
             target = np.array([0.8, 0.0, 0.2], dtype=np.float32)
 
@@ -124,7 +124,7 @@ class AuditHotfixTest(unittest.TestCase):
             data = _sample_data()
             for frame in data.values():
                 frame.iloc[29, frame.columns.get_loc("log_return_1h")] = np.log(0.99)
-            env = BinanceSpotEnv(data, lookback=30, mode="eval")
+            env = SpotPortfolioEnv(data, lookback=30, mode="eval")
             env._weights = np.array([1.0, 0.0, 0.0], dtype=np.float32)
 
             _, _, terminated, _, info = env.step_weights(np.array([1.0, 0.0, 0.0], dtype=np.float32))
@@ -143,7 +143,7 @@ class AuditHotfixTest(unittest.TestCase):
             trading_env.REWARD_ACTION_DELTA_WEIGHT = 1.0
             trading_env.REWARD_ACTION_DELTA_DEADBAND = 0.0
             trading_env.REWARD_ACTION_DELTA_SCALE = 1.0
-            env = BinanceSpotEnv(_sample_data(), lookback=30, mode="eval")
+            env = SpotPortfolioEnv(_sample_data(), lookback=30, mode="eval")
             old_weights = np.array([0.2, 0.2, 0.6], dtype=np.float32)
 
             reward_small, components_small = env._compute_reward(
@@ -176,7 +176,7 @@ class AuditHotfixTest(unittest.TestCase):
             trading_env.REWARD_ACTION_DELTA_WEIGHT = 1.0
             trading_env.REWARD_ACTION_DELTA_DEADBAND = 0.10
             trading_env.REWARD_ACTION_DELTA_SCALE = 1.0
-            env = BinanceSpotEnv(_sample_data(), lookback=30, mode="eval")
+            env = SpotPortfolioEnv(_sample_data(), lookback=30, mode="eval")
 
             _, components = env._compute_reward(
                 net_return=1.0,
@@ -201,7 +201,7 @@ class AuditHotfixTest(unittest.TestCase):
             trading_env.REBALANCE_THRESHOLD_NORMAL = 0.03
             trading_env.REBALANCE_THRESHOLD_STRESS = 0.05
             trading_env.REBALANCE_THRESHOLD_CRISIS = 0.08
-            env = BinanceSpotEnv(_sample_data(), lookback=30, mode="eval")
+            env = SpotPortfolioEnv(_sample_data(), lookback=30, mode="eval")
             env._weights = np.array([0.30, 0.30, 0.40], dtype=np.float32)
             env._obs_arrays["BTCUSDT"][env._step_idx - 1, env._bb_width_idx] = 1.5
 
@@ -225,7 +225,7 @@ class AuditHotfixTest(unittest.TestCase):
             trading_env.MIN_HOLD_BARS = 3
             trading_env.MATERIAL_TRADE_THRESHOLD = 0.05
             data = _sample_data()
-            env = BinanceSpotEnv(data, lookback=30, mode="eval")
+            env = SpotPortfolioEnv(data, lookback=30, mode="eval")
 
             _, _, _, _, info_open = env.step_weights(np.array([0.40, 0.30, 0.30], dtype=np.float32))
             self.assertFalse(info_open["rebalance_blocked_by_cooldown"])
@@ -256,7 +256,7 @@ class AuditHotfixTest(unittest.TestCase):
             trading_env.REBALANCE_THRESHOLD_NORMAL = 0.01
             trading_env.MATERIAL_TRADE_THRESHOLD = 0.05
             trading_env.REVERSAL_HYSTERESIS_MULT = 2.0
-            env = BinanceSpotEnv(_sample_data(), lookback=30, mode="eval")
+            env = SpotPortfolioEnv(_sample_data(), lookback=30, mode="eval")
             env._weights = np.array([0.40, 0.20, 0.40], dtype=np.float32)
             env._last_material_trade_direction = np.array([1.0, 0.0], dtype=np.float32)
             env._bars_since_last_material_trade = 10
@@ -276,7 +276,7 @@ class AuditHotfixTest(unittest.TestCase):
         try:
             trading_env.POSITION_RESET_WEIGHT_THRESHOLD = 0.05
             trading_env.POSITION_RESET_PERSIST_BARS = 2
-            env = BinanceSpotEnv(_sample_data(), lookback=30, mode="eval")
+            env = SpotPortfolioEnv(_sample_data(), lookback=30, mode="eval")
             env._weights = np.array([0.02, 0.00, 0.98], dtype=np.float32)
             env._asset_synthetic_prices[0] = 1.95
             env._asset_highest_prices[0] = 2.0
@@ -291,6 +291,30 @@ class AuditHotfixTest(unittest.TestCase):
         finally:
             trading_env.POSITION_RESET_WEIGHT_THRESHOLD = old_threshold
             trading_env.POSITION_RESET_PERSIST_BARS = old_persist
+
+    def test_step_weights_blocks_subminimum_notional_rebalance(self):
+        env = SpotPortfolioEnv(_sample_data(), lookback=30, initial_capital=100.0, mode="eval")
+
+        _, _, _, _, info = env.step_weights(np.array([0.05, 0.0, 0.95], dtype=np.float32))
+
+        self.assertTrue(info["rebalance_blocked_by_min_notional"])
+        self.assertEqual(info["min_notional_blocked_count"], 1)
+        self.assertEqual(info["min_notional_blocked_assets"], "BTCUSDT")
+        self.assertAlmostEqual(float(info["weights"][0]), 0.0, places=6)
+        self.assertAlmostEqual(float(info["weights"][1]), 0.0, places=6)
+        self.assertAlmostEqual(float(info["weights"][2]), 1.0, places=6)
+
+    def test_step_weights_executes_tradeable_legs_and_blocks_dust_legs(self):
+        env = SpotPortfolioEnv(_sample_data(), lookback=30, initial_capital=100.0, mode="eval")
+
+        _, _, _, _, info = env.step_weights(np.array([0.12, 0.06, 0.82], dtype=np.float32))
+
+        self.assertTrue(info["rebalance_blocked_by_min_notional"])
+        self.assertEqual(info["min_notional_blocked_count"], 1)
+        self.assertEqual(info["min_notional_blocked_assets"], "ETHUSDT")
+        self.assertAlmostEqual(float(info["weights"][0]), 0.12, places=6)
+        self.assertAlmostEqual(float(info["weights"][1]), 0.0, places=6)
+        self.assertAlmostEqual(float(info["weights"][2]), 0.88, places=6)
 
 
 if __name__ == "__main__":

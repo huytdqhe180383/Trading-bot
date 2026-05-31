@@ -35,7 +35,7 @@ from config import (
     TRAIN_DEVICE, REQUIRE_GPU_FOR_TRAINING, TRAIN_VALIDATION_FRACTION, TRAIN_SEED,
     ENSEMBLE_METHOD,
 )
-from environment.trading_env import BinanceSpotEnv
+from environment.trading_env import SpotPortfolioEnv
 
 
 ALGO_CLS = {"PPO": PPO, "SAC": SAC}
@@ -160,11 +160,11 @@ def train_algo(
 
     # ── Environment setup ────────────────────────────────────────────────
     def make_train_env():
-        env = BinanceSpotEnv(train_data, mode="train")
+        env = SpotPortfolioEnv(train_data, mode="train")
         return Monitor(env, str(LOGS_DIR / algo))
 
     def make_eval_env():
-        env = BinanceSpotEnv(eval_data, mode="eval")
+        env = SpotPortfolioEnv(eval_data, mode="eval")
         return Monitor(env, str(LOGS_DIR / f"{algo}_eval"))
 
     if algo == "SAC":
