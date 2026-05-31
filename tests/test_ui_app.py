@@ -192,6 +192,7 @@ class UIAppTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("Strategy NAV excludes non-strategy assets such as OKB.", response.text)
             self.assertIn("Live bot status", response.text)
+            self.assertIn("Today Unrealized PnL", response.text)
 
     def test_logout_invalidates_session(self):
         client, tmp = self._build_client()
@@ -241,6 +242,15 @@ class UIAppTest(unittest.TestCase):
             response = client.get("/reports/file/2026-05-31/live_report_2026-05-31_asia_bangkok.md")
             self.assertEqual(response.status_code, 200)
             self.assertIn("# report", response.text)
+
+    def test_reports_page_labels_unrealized_pnl(self):
+        client, tmp = self._build_client()
+        with tmp:
+            self._login(client)
+            response = client.get("/reports")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Unrealized PnL USD", response.text)
+            self.assertIn("Unrealized PnL %", response.text)
 
     def test_control_endpoint_rejects_when_disabled(self):
         client, tmp = self._build_client(controls_enabled=False)

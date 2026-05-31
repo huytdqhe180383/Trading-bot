@@ -33,8 +33,8 @@
 
 <section class="card-grid">
   <article class="panel metric"><div class="label">Rows</div><div class="value">{{ summary.rows }}</div></article>
-  <article class="panel metric"><div class="label">PnL USD</div><div class="value">${{ '%.2f'|format((summary.pnl_usd if summary.get('pnl_usd') is not none else 0) or 0) }}</div></article>
-  <article class="panel metric"><div class="label">PnL %</div><div class="value">{{ '%.2f'|format((summary.pnl_pct if summary.get('pnl_pct') is not none else 0) or 0) }}%</div></article>
+  <article class="panel metric"><div class="label">Unrealized PnL USD</div><div class="value">${{ '%.2f'|format((summary.unrealized_pnl_usd if summary.get('unrealized_pnl_usd') is not none else (summary.pnl_usd if summary.get('pnl_usd') is not none else 0)) or 0) }}</div></article>
+  <article class="panel metric"><div class="label">Unrealized PnL %</div><div class="value">{{ '%.2f'|format((summary.unrealized_pnl_pct if summary.get('unrealized_pnl_pct') is not none else (summary.pnl_pct if summary.get('pnl_pct') is not none else 0)) or 0) }}%</div></article>
   <article class="panel metric"><div class="label">Orders filled</div><div class="value">{{ summary.orders_filled }}</div></article>
 </section>
 
@@ -61,7 +61,7 @@
           <th>Local time</th>
           <th>Cycle</th>
           <th>NAV</th>
-          <th>PnL %</th>
+          <th>Unrealized PnL %</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -71,7 +71,7 @@
           <td>{{ row.timestamp_local }}</td>
           <td>{{ row.cycle }}</td>
           <td>${{ '%.2f'|format(row.nav or 0) }}</td>
-          <td>{{ '%.2f'|format(row.pnl_pct or 0) }}%</td>
+          <td>{{ '%.2f'|format((row.unrealized_pnl_pct if row.get('unrealized_pnl_pct') is not none else (row.pnl_pct if row.get('pnl_pct') is not none else 0)) or 0) }}%</td>
           <td>{{ row.status or 'n/a' }}</td>
         </tr>
         {% endfor %}

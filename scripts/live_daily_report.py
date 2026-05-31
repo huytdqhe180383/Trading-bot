@@ -74,8 +74,10 @@ def summarize_frame(df: pd.DataFrame, tz_name: str) -> dict[str, object]:
         out["end_nav"] = end_nav
         out["min_nav"] = float(df["nav"].min())
         out["max_nav"] = float(df["nav"].max())
-        out["pnl_usd"] = end_nav - start_nav
-        out["pnl_pct"] = ((end_nav / start_nav) - 1.0) * 100.0 if start_nav else 0.0
+        out["unrealized_pnl_usd"] = end_nav - start_nav
+        out["unrealized_pnl_pct"] = ((end_nav / start_nav) - 1.0) * 100.0 if start_nav else 0.0
+        out["pnl_usd"] = out["unrealized_pnl_usd"]
+        out["pnl_pct"] = out["unrealized_pnl_pct"]
     if "btc_weight" in df.columns:
         out["avg_btc_weight"] = float(df["btc_weight"].mean())
     if "eth_weight" in df.columns:
@@ -99,6 +101,8 @@ def print_report(df: pd.DataFrame, tz_name: str, title: str) -> None:
             "timestamp_local",
             "cycle",
             "nav",
+            "unrealized_pnl_usd",
+            "unrealized_pnl_pct",
             "pnl_usd",
             "pnl_pct",
             "btc_weight",
@@ -126,6 +130,8 @@ def build_report_markdown(df: pd.DataFrame, tz_name: str, title: str) -> str:
                 "timestamp_local",
                 "cycle",
                 "nav",
+                "unrealized_pnl_usd",
+                "unrealized_pnl_pct",
                 "pnl_usd",
                 "pnl_pct",
                 "btc_weight",

@@ -134,6 +134,7 @@ class UIServicesTest(unittest.TestCase):
             self.assertEqual(payload["status"]["active_state"], "active")
             self.assertEqual(payload["today"]["summary"]["rows"], 2)
             self.assertEqual(payload["full_history"]["summary"]["orders_filled"], 1)
+            self.assertAlmostEqual(payload["today"]["summary"]["unrealized_pnl_usd"], 150.0, places=6)
             self.assertEqual(payload["note"], STRATEGY_NAV_NOTE)
 
 

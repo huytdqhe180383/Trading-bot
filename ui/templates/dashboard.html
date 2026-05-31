@@ -19,14 +19,14 @@
     <div class="muted">Latest cycle at {{ latest_row.timestamp_local if latest_row else 'n/a' }}</div>
   </article>
   <article class="panel metric">
-    <div class="label">Today PnL</div>
-    <div class="value">${{ '%.2f'|format((today.summary.pnl_usd if today.summary.get('pnl_usd') is not none else 0) or 0) }}</div>
-    <div class="muted">{{ '%.2f'|format((today.summary.pnl_pct if today.summary.get('pnl_pct') is not none else 0) or 0) }}%</div>
+    <div class="label">Today Unrealized PnL</div>
+    <div class="value">${{ '%.2f'|format((today.summary.unrealized_pnl_usd if today.summary.get('unrealized_pnl_usd') is not none else (today.summary.pnl_usd if today.summary.get('pnl_usd') is not none else 0)) or 0) }}</div>
+    <div class="muted">{{ '%.2f'|format((today.summary.unrealized_pnl_pct if today.summary.get('unrealized_pnl_pct') is not none else (today.summary.pnl_pct if today.summary.get('pnl_pct') is not none else 0)) or 0) }}%</div>
   </article>
   <article class="panel metric">
-    <div class="label">Full-history PnL</div>
-    <div class="value">${{ '%.2f'|format((full_history.summary.pnl_usd if full_history.summary.get('pnl_usd') is not none else 0) or 0) }}</div>
-    <div class="muted">{{ '%.2f'|format((full_history.summary.pnl_pct if full_history.summary.get('pnl_pct') is not none else 0) or 0) }}%</div>
+    <div class="label">Full-history Unrealized PnL</div>
+    <div class="value">${{ '%.2f'|format((full_history.summary.unrealized_pnl_usd if full_history.summary.get('unrealized_pnl_usd') is not none else (full_history.summary.pnl_usd if full_history.summary.get('pnl_usd') is not none else 0)) or 0) }}</div>
+    <div class="muted">{{ '%.2f'|format((full_history.summary.unrealized_pnl_pct if full_history.summary.get('unrealized_pnl_pct') is not none else (full_history.summary.pnl_pct if full_history.summary.get('pnl_pct') is not none else 0)) or 0) }}%</div>
   </article>
   <article class="panel metric">
     <div class="label">Service</div>

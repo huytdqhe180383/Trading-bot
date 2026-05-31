@@ -635,6 +635,12 @@ def main() -> None:
         if safety_reasons:
             for reason in safety_reasons:
                 logger.warning(f"SAFETY_GATE {reason}")
+            unrealized_pnl_usd = nav - (initial_nav or nav)
+            unrealized_pnl_pct = (
+                (unrealized_pnl_usd / initial_nav * 100.0)
+                if (initial_nav and initial_nav > 0)
+                else 0.0
+            )
             row = {
                 "timestamp_utc": ts.isoformat(),
                 "timestamp_local": ts.astimezone(session_tz).isoformat(),
@@ -642,8 +648,10 @@ def main() -> None:
                 "exchange": args.exchange,
                 "mode": args.mode,
                 "nav": nav,
-                "pnl_usd": nav - (initial_nav or nav),
-                "pnl_pct": ((nav - initial_nav) / initial_nav * 100.0) if (initial_nav and initial_nav > 0) else 0.0,
+                "unrealized_pnl_usd": unrealized_pnl_usd,
+                "unrealized_pnl_pct": unrealized_pnl_pct,
+                "pnl_usd": unrealized_pnl_usd,
+                "pnl_pct": unrealized_pnl_pct,
                 "btc_weight": float(exec_weights[0]),
                 "eth_weight": float(exec_weights[1]),
                 "cash_weight": float(exec_weights[2]),
@@ -688,9 +696,13 @@ def main() -> None:
             except Exception as exc:
                 logger.error(f"Order failed for {order['symbol']} {order['side']}: {exc}")
 
-        pnl_usd = nav - (initial_nav or nav)
-        pnl_pct = (pnl_usd / initial_nav * 100.0) if (initial_nav and initial_nav > 0) else 0.0
-        logger.info(f"NAV=${nav:,.2f} | Session PnL=${pnl_usd:,.2f} ({pnl_pct:.2f}%)")
+        unrealized_pnl_usd = nav - (initial_nav or nav)
+        unrealized_pnl_pct = (
+            (unrealized_pnl_usd / initial_nav * 100.0) if (initial_nav and initial_nav > 0) else 0.0
+        )
+        logger.info(
+            f"NAV=${nav:,.2f} | Session Unrealized PnL=${unrealized_pnl_usd:,.2f} ({unrealized_pnl_pct:.2f}%)"
+        )
 
         row = {
             "timestamp_utc": ts.isoformat(),
@@ -699,8 +711,10 @@ def main() -> None:
             "exchange": args.exchange,
             "mode": args.mode,
             "nav": nav,
-            "pnl_usd": pnl_usd,
-            "pnl_pct": pnl_pct,
+            "unrealized_pnl_usd": unrealized_pnl_usd,
+            "unrealized_pnl_pct": unrealized_pnl_pct,
+            "pnl_usd": unrealized_pnl_usd,
+            "pnl_pct": unrealized_pnl_pct,
             "btc_weight": float(exec_weights[0]),
             "eth_weight": float(exec_weights[1]),
             "cash_weight": float(exec_weights[2]),
