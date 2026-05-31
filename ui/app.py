@@ -230,6 +230,7 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request) -> HTMLResponse:
+        _maybe_authenticate_via_tailscale(request, context)
         if request.session.get("authenticated"):
             return RedirectResponse(url="/", status_code=303)
         template_ctx = _base_template_context(request, context)

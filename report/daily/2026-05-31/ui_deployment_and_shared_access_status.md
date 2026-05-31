@@ -73,6 +73,15 @@ The remaining required step for the rootless path is:
 2. finish authentication into the target tailnet
 3. run `enable_rootless_tailscale_serve.sh`
 
+## Follow-Up UX Fix
+
+After enabling trusted Tailscale headers, allowed users no longer need to type
+the fallback UI password on `/login`.
+
+The UI now auto-redirects an allowed Tailscale identity from `/login` to `/`,
+which removes the confusing "Invalid credentials" path for normal tailnet
+access from the phone browser.
+
 ## Security-Safe Recommendation
 
 Do not expose the UI publicly on `0.0.0.0` as a workaround.

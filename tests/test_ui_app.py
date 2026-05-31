@@ -267,6 +267,17 @@ class UIAppTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("friend@example.com", response.text)
 
+    def test_tailscale_allowed_user_is_redirected_from_login_page(self):
+        client, tmp = self._build_tailscale_client()
+        with tmp:
+            response = client.get(
+                "/login",
+                headers={"Tailscale-User-Login": "owner@example.com"},
+                follow_redirects=False,
+            )
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/")
+
     def test_tailscale_disallowed_user_is_forbidden(self):
         client, tmp = self._build_tailscale_client()
         with tmp:
