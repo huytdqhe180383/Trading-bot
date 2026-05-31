@@ -747,6 +747,35 @@ It shows:
 
 This is much easier for daily checks than manually typing multiple commands.
 
+### Daily report command
+
+For a clean per-day paper-trading summary in `Asia/Bangkok`:
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --date "$(TZ=Asia/Bangkok date +%F)"
+```
+
+Export compact tracked files too:
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --date "$(TZ=Asia/Bangkok date +%F)" --export
+```
+
+Rolling last-24h summary:
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --last-hours 24
+```
+
+This report reads all live decision CSVs and groups rows by local timezone, so
+it is safer than relying on the raw `results/daily/YYYY-MM-DD/` folder name.
+
 ### Optional: remove the `journalctl` permission warning
 
 The warning means your `deploy` user cannot read the full system journal without `sudo`.

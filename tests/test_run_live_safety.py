@@ -14,6 +14,7 @@ from scripts.run_live import (
     compute_turnover,
     create_live_session_dir,
     evaluate_safety_gates,
+    get_live_session_tz,
     has_exchange_credentials,
     infer_obs_dim_from_ensemble,
     latest_market_timestamp,
@@ -123,6 +124,9 @@ class RunLiveSafetyTest(unittest.TestCase):
             self.assertTrue((session_dir / "live_session_metadata.json").exists())
             self.assertTrue((session_dir / "live_trade_decisions_okx_testnet.csv").exists())
             self.assertTrue((session_dir / "live_session_summary.json").exists())
+
+    def test_live_session_timezone_defaults_to_bangkok(self):
+        self.assertEqual(str(get_live_session_tz()), "Asia/Bangkok")
 
     def test_safety_gates_accept_fresh_native_signals(self):
         raw_state = self._raw_state("2026-01-01 10:00:00")

@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -35,6 +36,7 @@ from config import (
     LIVE_MAX_DATA_STALENESS_SECS,
     LIVE_REQUIRE_NATIVE_KRONOS,
     LIVE_REQUIRE_NATIVE_TRADINGAGENTS,
+    LIVE_SESSION_TIMEZONE,
     LOGS_DIR,
     MAX_ASSET_WEIGHT,
     MAX_PORTFOLIO_TURNOVER,
@@ -75,8 +77,12 @@ from risk.risk_constraints import apply_stress_risk_governor
 load_dotenv()
 
 
+def get_live_session_tz() -> ZoneInfo:
+    return ZoneInfo(LIVE_SESSION_TIMEZONE)
+
+
 def create_live_session_dir(results_dir: Path = RESULTS_DIR, *, run_date: str | None = None) -> Path:
-    day = run_date or datetime.now().strftime("%Y-%m-%d")
+    day = run_date or datetime.now(get_live_session_tz()).strftime("%Y-%m-%d")
     daily_dir = Path(results_dir) / "daily" / day
     daily_dir.mkdir(parents=True, exist_ok=True)
     existing_numbers = [
@@ -472,6 +478,7 @@ def main() -> None:
     parser.set_defaults(enable_kronos=ENABLE_KRONOS, enable_ta=ENABLE_TRADINGAGENTS)
     args = parser.parse_args()
     args.model_dir = resolve_live_model_dir(args.model_dir)
+    session_tz = get_live_session_tz()
 
     log_file = LOGS_DIR / f"run_{args.exchange}_{args.mode}.log"
     logger.add(log_file, rotation="10 MB", retention="30 days")
@@ -480,7 +487,7 @@ def main() -> None:
     write_live_session_metadata(
         session_dir,
         {
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(session_tz).isoformat(),
             "exchange": args.exchange,
             "mode": args.mode,
             "model_dir": args.model_dir,
@@ -492,6 +499,7 @@ def main() -> None:
             "bootstrap_usdt": args.bootstrap_usdt,
             "bootstrap_btc": args.bootstrap_btc,
             "bootstrap_eth": args.bootstrap_eth,
+            "session_timezone": LIVE_SESSION_TIMEZONE,
         },
     )
     logger.info(
@@ -629,6 +637,7 @@ def main() -> None:
                 logger.warning(f"SAFETY_GATE {reason}")
             row = {
                 "timestamp_utc": ts.isoformat(),
+                "timestamp_local": ts.astimezone(session_tz).isoformat(),
                 "cycle": cycle,
                 "exchange": args.exchange,
                 "mode": args.mode,
@@ -685,6 +694,7 @@ def main() -> None:
 
         row = {
             "timestamp_utc": ts.isoformat(),
+            "timestamp_local": ts.astimezone(session_tz).isoformat(),
             "cycle": cycle,
             "exchange": args.exchange,
             "mode": args.mode,

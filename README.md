@@ -132,6 +132,7 @@ Current live baseline:
 - method: `dynamic_weighted`
 - overlays: disabled by default (`ENABLE_KRONOS=false`, `ENABLE_TRADINGAGENTS=false`)
 - execution controls: adaptive threshold + cooldown + reversal hysteresis + delayed position-reset reset
+- live session timezone: `Asia/Bangkok` by default (`LIVE_SESSION_TIMEZONE`)
 
 Paper/dry-run verification without private credentials:
 
@@ -144,6 +145,15 @@ Enable/disable fusion components:
 ```powershell
 python run_live.py --enable-kronos --enable-tradingagents
 python run_live.py --disable-kronos --disable-tradingagents
+```
+
+Daily live report:
+
+```powershell
+python scripts/live_daily_report.py --date 2026-05-31
+python scripts/live_daily_report.py --date 2026-05-31 --export
+python scripts/live_daily_report.py --last-hours 24
+python scripts/live_daily_report.py --full-history
 ```
 
 TradingAgents local research mode:

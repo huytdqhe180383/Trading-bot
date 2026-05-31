@@ -216,6 +216,7 @@ ENSEMBLE_METHOD = "dynamic_weighted"
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY_SECS = 10
 REBALANCE_INTERVAL_SECS = 3600
+LIVE_SESSION_TIMEZONE = _env_str("LIVE_SESSION_TIMEZONE", "Asia/Bangkok")
 
 # ============================================================
 # SIGNAL INTEGRATION (Kronos + TradingAgents + Meta-Fusion)
