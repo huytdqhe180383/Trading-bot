@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10231d">
+  <title>{% block title %}Trading Bot UI{% endblock %}</title>
+  <link rel="manifest" href="{{ url_for('static', path='manifest.webmanifest') }}">
+  <link rel="icon" href="{{ url_for('static', path='icon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="{{ url_for('static', path='icon.svg') }}" alt="" class="brand-icon">
+      <div>
+        <div class="eyebrow">Private Tailnet UI</div>
+        <h1>Trading Bot Console</h1>
+      </div>
+    </div>
+    {% if request.session.get('authenticated') %}
+    <form method="post" action="/logout" class="logout-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="ghost-button">Log out</button>
+    </form>
+    {% endif %}
+  </header>
+
+  {% if request.session.get('authenticated') %}
+  <nav class="nav">
+    <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
+    <a href="/reports" class="{% if request.url.path.startswith('/reports') %}active{% endif %}">Reports</a>
+    <a href="/history" class="{% if request.url.path.startswith('/history') %}active{% endif %}">History</a>
+    <a href="/logs" class="{% if request.url.path.startswith('/logs') %}active{% endif %}">Logs</a>
+  </nav>
+  {% endif %}
+
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="{{ url_for('static', path='app.js') }}"></script>
+</body>
+</html>

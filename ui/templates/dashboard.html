@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | Trading Bot UI{% endblock %}
+{% block content %}
+<section class="hero-card">
+  <div>
+    <div class="eyebrow">Private operator console</div>
+    <h2>Live bot status</h2>
+    <p class="muted">{{ note }}</p>
+  </div>
+  <div class="status-pill {{ 'running' if status.active_state == 'active' else 'stopped' }}">
+    {{ status.active_state }} / {{ status.sub_state }}
+  </div>
+</section>
+
+<section class="card-grid">
+  <article class="panel metric">
+    <div class="label">Latest NAV</div>
+    <div class="value">${{ '%.2f'|format((latest_row.nav if latest_row else 0) or 0) }}</div>
+    <div class="muted">Latest cycle at {{ latest_row.timestamp_local if latest_row else 'n/a' }}</div>
+  </article>
+  <article class="panel metric">
+    <div class="label">Today PnL</div>
+    <div class="value">${{ '%.2f'|format((today.summary.pnl_usd if today.summary.get('pnl_usd') is not none else 0) or 0) }}</div>
+    <div class="muted">{{ '%.2f'|format((today.summary.pnl_pct if today.summary.get('pnl_pct') is not none else 0) or 0) }}%</div>
+  </article>
+  <article class="panel metric">
+    <div class="label">Full-history PnL</div>
+    <div class="value">${{ '%.2f'|format((full_history.summary.pnl_usd if full_history.summary.get('pnl_usd') is not none else 0) or 0) }}</div>
+    <div class="muted">{{ '%.2f'|format((full_history.summary.pnl_pct if full_history.summary.get('pnl_pct') is not none else 0) or 0) }}%</div>
+  </article>
+  <article class="panel metric">
+    <div class="label">Service</div>
+    <div class="value">{{ status.service_name }}</div>
+    <div class="muted">PID {{ status.main_pid }}{% if status.started_at %} · {{ status.started_at }}{% endif %}</div>
+  </article>
+</section>
+
+<section class="card-grid">
+  <article class="panel">
+    <div class="panel-title">Current weights</div>
+    {% if latest_row %}
+    <div class="weight-row"><span>BTC</span><strong>{{ '%.2f'|format((latest_row.btc_weight or 0) * 100) }}%</strong></div>
+    <div class="weight-row"><span>ETH</span><strong>{{ '%.2f'|format((latest_row.eth_weight or 0) * 100) }}%</strong></div>
+    <div class="weight-row"><span>Cash</span><strong>{{ '%.2f'|format((latest_row.cash_weight or 0) * 100) }}%</strong></div>
+    {% else %}
+    <p class="muted">No live rows yet.</p>
+    {% endif %}
+  </article>
+  <article class="panel">
+    <div class="panel-title">Controls</div>
+    <p class="muted">Read-only phase. Controls are {% if controls_enabled %}enabled{% else %}disabled{% endif %}.</p>
+    <div class="button-row">
+      <button class="ghost-button" type="button" disabled>Start</button>
+      <button class="ghost-button" type="button" disabled>Stop</button>
+      <button class="ghost-button" type="button" disabled>Restart</button>
+    </div>
+  </article>
+</section>
+{% endblock %}

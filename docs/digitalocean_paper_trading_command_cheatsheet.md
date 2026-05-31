@@ -96,6 +96,30 @@ sudo journalctl -u trading-bot -n 200 --no-pager
 tail -n 100 /home/deploy/trading-bot/logs/live_stderr.log
 ```
 
+### Check private UI status
+
+```bash
+sudo systemctl status trading-bot-ui --no-pager
+```
+
+### Restart private UI
+
+```bash
+sudo systemctl restart trading-bot-ui
+```
+
+### Tail private UI service logs
+
+```bash
+sudo journalctl -u trading-bot-ui -n 200 --no-pager
+```
+
+### Tail private UI audit log
+
+```bash
+tail -n 100 /home/deploy/trading-bot/logs/ui_audit.jsonl
+```
+
 ---
 
 ## 2. Connect To The Server

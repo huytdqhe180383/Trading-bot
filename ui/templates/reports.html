@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Reports | Trading Bot UI{% endblock %}
+{% block content %}
+<section class="hero-card">
+  <div>
+    <div class="eyebrow">Compact analytics</div>
+    <h2>{{ title }}</h2>
+    <p class="muted">{{ note }}</p>
+  </div>
+</section>
+
+<section class="panel">
+  <form method="get" action="/reports" class="controls-grid">
+    <label>
+      <span>Mode</span>
+      <select name="mode">
+        <option value="date" {% if mode == 'date' %}selected{% endif %}>Date</option>
+        <option value="last_hours" {% if mode == 'last_hours' %}selected{% endif %}>Last hours</option>
+        <option value="full_history" {% if mode == 'full_history' %}selected{% endif %}>Full history</option>
+      </select>
+    </label>
+    <label>
+      <span>Date</span>
+      <input type="date" name="date" value="{{ selected_date or '' }}">
+    </label>
+    <label>
+      <span>Hours</span>
+      <input type="number" min="1" name="hours" value="{{ hours or 24 }}">
+    </label>
+    <button type="submit" class="primary-button">Load report</button>
+  </form>
+</section>
+
+<section class="card-grid">
+  <article class="panel metric"><div class="label">Rows</div><div class="value">{{ summary.rows }}</div></article>
+  <article class="panel metric"><div class="label">PnL USD</div><div class="value">${{ '%.2f'|format((summary.pnl_usd if summary.get('pnl_usd') is not none else 0) or 0) }}</div></article>
+  <article class="panel metric"><div class="label">PnL %</div><div class="value">{{ '%.2f'|format((summary.pnl_pct if summary.get('pnl_pct') is not none else 0) or 0) }}%</div></article>
+  <article class="panel metric"><div class="label">Orders filled</div><div class="value">{{ summary.orders_filled }}</div></article>
+</section>
+
+<section class="panel">
+  <div class="panel-title">Compact report files</div>
+  {% if export_files %}
+  <ul class="link-list">
+    {% for filename in export_files %}
+    <li><a href="/reports/file/{{ export_day }}/{{ filename }}">{{ filename }}</a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No compact report files found for this view yet.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-title">Recent rows</div>
+  {% if recent_rows %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Local time</th>
+          <th>Cycle</th>
+          <th>NAV</th>
+          <th>PnL %</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in recent_rows %}
+        <tr>
+          <td>{{ row.timestamp_local }}</td>
+          <td>{{ row.cycle }}</td>
+          <td>${{ '%.2f'|format(row.nav or 0) }}</td>
+          <td>{{ '%.2f'|format(row.pnl_pct or 0) }}%</td>
+          <td>{{ row.status or 'n/a' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No rows available for this report.</p>
+  {% endif %}
+</section>
+{% endblock %}

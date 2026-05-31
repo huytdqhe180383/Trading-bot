@@ -156,6 +156,38 @@ python scripts/live_daily_report.py --last-hours 24
 python scripts/live_daily_report.py --full-history
 ```
 
+## private UI
+
+The repository now includes a private, phone-friendly web UI/PWA for bot
+operations.
+
+Current security posture:
+
+- private use only
+- read-only first
+- Tailscale-only deployment recommended
+- no public ingress
+- controls disabled by default
+
+Main entrypoints:
+
+- `python scripts/run_ui.py`
+- `scripts/server/trading-bot-ui.service.example`
+
+Required UI env:
+
+- `UI_USERNAME`
+- `UI_PASSWORD`
+- `UI_SESSION_SECRET`
+- `UI_BIND_HOST`
+- `UI_PORT`
+- `UI_ENABLE_CONTROLS=false`
+
+Related docs:
+
+- `docs/digitalocean_private_ui_deployment_guide.md`
+- `report/important/secure_private_ui_security_baseline.md`
+
 TradingAgents local research mode:
 
 - `TRADINGAGENTS_PROVIDER_FALLBACKS` in `config.py` controls order.
@@ -207,5 +239,6 @@ Keep secrets, raw market data, model artifacts, and logs out of commits.
 - `docs/codebase_audit.md`
 - `docs/architecture.md`
 - `docs/digitalocean_live_deployment_guide.md`
+- `docs/digitalocean_private_ui_deployment_guide.md`
 - `docs/rocm_runtime_architecture.md`
 - `docs/trading_env_documentation.md`

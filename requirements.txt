@@ -5,6 +5,8 @@
 # Deep Reinforcement Learning Framework
 stable-baselines3>=2.7.1
 sb3-contrib>=2.7.1          # Extra algorithms (RecurrentPPO, TQC, etc.)
+fastapi>=0.136.0
+uvicorn>=0.48.0
 
 # Data & Numerics
 numpy>=1.26.0
@@ -32,6 +34,8 @@ python-dotenv>=1.0.0        # Loads .env file for API keys
 requests>=2.31.0
 tqdm>=4.66.0
 loguru>=0.7.2               # Structured logging
+itsdangerous>=2.2.0
+python-multipart>=0.0.20
 
 # FinRL-X (clone from GitHub, then install locally)
 # git clone https://github.com/AI4Finance-Foundation/FinRL-Trading.git

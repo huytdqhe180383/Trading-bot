@@ -41,6 +41,7 @@ DATA_DIR = BASE_DIR / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 MODELS_DIR = BASE_DIR / "models"
+REPORTS_DIR = BASE_DIR / "report"
 LIVE_BASELINE_MODEL_DIR = Path(
     _env_str("LIVE_BASELINE_MODEL_DIR", str(MODELS_DIR / "live_baseline"))
 )
@@ -48,7 +49,7 @@ LOGS_DIR = BASE_DIR / "logs"
 RESULTS_DIR = BASE_DIR / "results"
 ARCHIVE_DIR = BASE_DIR / "archive"
 
-for d in [RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, LIVE_BASELINE_MODEL_DIR, LOGS_DIR, RESULTS_DIR, ARCHIVE_DIR]:
+for d in [RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, REPORTS_DIR, LIVE_BASELINE_MODEL_DIR, LOGS_DIR, RESULTS_DIR, ARCHIVE_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 # ============================================================
@@ -217,6 +218,22 @@ MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY_SECS = 10
 REBALANCE_INTERVAL_SECS = 3600
 LIVE_SESSION_TIMEZONE = _env_str("LIVE_SESSION_TIMEZONE", "Asia/Bangkok")
+
+# ============================================================
+# PRIVATE UI / PWA SETTINGS
+# ============================================================
+UI_USERNAME = _env_str("UI_USERNAME", "")
+UI_PASSWORD = _env_str("UI_PASSWORD", "")
+UI_SESSION_SECRET = _env_str("UI_SESSION_SECRET", "change-me-before-deploy")
+UI_BIND_HOST = _env_str("UI_BIND_HOST", "127.0.0.1")
+UI_PORT = _env_int("UI_PORT", 8080)
+UI_TAIL_LINES_DEFAULT = _env_int("UI_TAIL_LINES_DEFAULT", 200)
+UI_LOGIN_RATE_LIMIT = _env_int("UI_LOGIN_RATE_LIMIT", 5)
+UI_ENABLE_CONTROLS = _env_bool("UI_ENABLE_CONTROLS", False)
+UI_CONTROL_RATE_LIMIT = _env_int("UI_CONTROL_RATE_LIMIT", 8)
+UI_SESSION_MAX_AGE_SECS = _env_int("UI_SESSION_MAX_AGE_SECS", 8 * 3600)
+UI_AUDIT_LOG_PATH = LOGS_DIR / "ui_audit.jsonl"
+UI_TARGET_SERVICE = _env_str("UI_TARGET_SERVICE", "trading-bot")
 
 # ============================================================
 # SIGNAL INTEGRATION (Kronos + TradingAgents + Meta-Fusion)

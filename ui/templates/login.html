@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Login | Trading Bot UI{% endblock %}
+{% block content %}
+<section class="login-shell">
+  <div class="panel login-panel">
+    <div class="panel-title">Private access</div>
+    <p class="muted">This UI is intended for private tailnet-only use. Login is required for every operational page.</p>
+    {% if error %}
+    <div class="alert">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>
+        <span>Username</span>
+        <input type="text" name="username" autocomplete="username" required>
+      </label>
+      <label>
+        <span>Password</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="primary-button">Log in</button>
+    </form>
+  </div>
+</section>
+{% endblock %}
