@@ -86,6 +86,26 @@ sudo bash /home/deploy/trading-bot/scripts/server/install_private_ui_root.sh
 sudo bash /home/deploy/trading-bot/scripts/server/install_tailscale_ui_root.sh
 ```
 
+If you do **not** have root, there is also a rootless fallback using official
+static binaries and userspace networking:
+
+```bash
+bash /home/deploy/trading-bot/scripts/server/start_rootless_tailscale_ui.sh
+bash /home/deploy/trading-bot/scripts/server/enable_rootless_tailscale_serve.sh
+```
+
+This rootless mode still requires you to complete Tailscale authentication in
+the browser and then share the machine with friends.
+
+The first script will save the login URL to:
+
+```text
+/home/deploy/trading-bot/.tailscale/auth_url.txt
+```
+
+Open that URL in your browser, finish Tailscale sign-in, then run the second
+script to expose the UI through Tailscale Serve.
+
 ## 3. Upload The UI Service File
 
 The repo includes:
@@ -268,6 +288,8 @@ The repo includes an exact-command allowlist example:
 - [trading-bot-ui.service.example](../scripts/server/trading-bot-ui.service.example)
 - [install_private_ui_root.sh](../scripts/server/install_private_ui_root.sh)
 - [install_tailscale_ui_root.sh](../scripts/server/install_tailscale_ui_root.sh)
+- [start_rootless_tailscale_ui.sh](../scripts/server/start_rootless_tailscale_ui.sh)
+- [enable_rootless_tailscale_serve.sh](../scripts/server/enable_rootless_tailscale_serve.sh)
 - [trading-bot-ui.sudoers.example](../scripts/server/trading-bot-ui.sudoers.example)
 - [secure_private_ui_security_baseline.md](../report/important/secure_private_ui_security_baseline.md)
 - [shared_private_ui_tailscale_guide.md](./shared_private_ui_tailscale_guide.md)

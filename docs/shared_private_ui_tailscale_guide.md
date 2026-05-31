@@ -151,6 +151,21 @@ sudo bash /home/deploy/trading-bot/scripts/server/install_private_ui_root.sh
 sudo bash /home/deploy/trading-bot/scripts/server/install_tailscale_ui_root.sh
 ```
 
+If you do **not** have root on the server, use the rootless fallback:
+
+```bash
+bash /home/deploy/trading-bot/scripts/server/start_rootless_tailscale_ui.sh
+bash /home/deploy/trading-bot/scripts/server/enable_rootless_tailscale_serve.sh
+```
+
+The first script writes the Tailscale login URL to:
+
+```text
+/home/deploy/trading-bot/.tailscale/auth_url.txt
+```
+
+Open that URL, finish authentication, then run the second script.
+
 ## What To Do When Someone Should Lose Access
 
 1. remove them from `UI_ALLOWED_TAILSCALE_USERS`

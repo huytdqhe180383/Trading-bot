@@ -19,6 +19,22 @@ class UIDeployAssetsTest(unittest.TestCase):
         self.assertIn("tailscale up", text)
         self.assertIn("tailscale serve --bg --https=443", text)
 
+    def test_rootless_tailscale_scripts_exist(self):
+        start_path = ROOT / "scripts" / "server" / "start_rootless_tailscale_ui.sh"
+        serve_path = ROOT / "scripts" / "server" / "enable_rootless_tailscale_serve.sh"
+        start_text = start_path.read_text(encoding="utf-8")
+        serve_text = serve_path.read_text(encoding="utf-8")
+        self.assertIn("--tun=userspace-networking", start_text)
+        self.assertIn('tailscale_${TS_VERSION}_${TS_ARCH}.tgz', start_text)
+        self.assertIn("--json", start_text)
+        self.assertIn("AUTH_URL_FILE", start_text)
+        self.assertIn("--timeout=", start_text)
+        self.assertIn("PYTHON_BIN", start_text)
+        self.assertIn("BackendState", start_text)
+        self.assertIn("status --json", start_text)
+        self.assertIn("BackendState", serve_text)
+        self.assertIn("serve --bg --https=443", serve_text)
+
     def test_sudoers_example_is_exact_allowlist(self):
         path = ROOT / "scripts" / "server" / "trading-bot-ui.sudoers.example"
         text = path.read_text(encoding="utf-8")

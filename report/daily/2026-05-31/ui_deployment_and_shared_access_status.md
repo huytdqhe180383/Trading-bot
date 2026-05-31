@@ -37,12 +37,14 @@ Current status:
 - the UI is available locally on the Droplet
 - it has a non-root cron-based keepalive fallback
 - the existing trading bot remains running
-- the UI is **not yet exposed to friends** because Tailscale is not installed on
-  the Droplet and the `deploy` user does not have passwordless `sudo`
+- the UI is **not yet exposed to friends** because the final Tailscale auth
+  step has not been approved in the browser yet
+- there is now a rootless Tailscale fallback that does not require root to
+  start `tailscaled` in userspace mode
 
 ## Blocking Condition
 
-The remaining production-sharing steps require privileged access:
+The cleanest production-sharing path still benefits from privileged access:
 
 1. install Tailscale
 2. configure `tailscale serve`
@@ -54,9 +56,22 @@ The repo now includes scripted versions of those steps:
 - [install_private_ui_root.sh](../../../scripts/server/install_private_ui_root.sh)
 - [install_tailscale_ui_root.sh](../../../scripts/server/install_tailscale_ui_root.sh)
 - [trading-bot-ui.sudoers.example](../../../scripts/server/trading-bot-ui.sudoers.example)
+- [start_rootless_tailscale_ui.sh](../../../scripts/server/start_rootless_tailscale_ui.sh)
+- [enable_rootless_tailscale_serve.sh](../../../scripts/server/enable_rootless_tailscale_serve.sh)
 
-The current SSH user `deploy` can inspect the server and run the UI manually,
-but cannot perform those privileged operations.
+The current SSH user `deploy` can now:
+
+- inspect the server
+- run the UI manually
+- start rootless `tailscaled`
+- capture the Tailscale login URL into
+  `/home/deploy/trading-bot/.tailscale/auth_url.txt`
+
+The remaining required step for the rootless path is:
+
+1. open the saved Tailscale login URL in the browser
+2. finish authentication into the target tailnet
+3. run `enable_rootless_tailscale_serve.sh`
 
 ## Security-Safe Recommendation
 
