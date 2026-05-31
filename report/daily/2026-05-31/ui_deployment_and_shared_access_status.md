@@ -49,6 +49,12 @@ The remaining production-sharing steps require privileged access:
 3. install or enable a persistent `trading-bot-ui` service with `systemd`
 4. optionally add `sudoers` allowlisting for safe start/stop/restart control
 
+The repo now includes scripted versions of those steps:
+
+- [install_private_ui_root.sh](../../../scripts/server/install_private_ui_root.sh)
+- [install_tailscale_ui_root.sh](../../../scripts/server/install_tailscale_ui_root.sh)
+- [trading-bot-ui.sudoers.example](../../../scripts/server/trading-bot-ui.sudoers.example)
+
 The current SSH user `deploy` can inspect the server and run the UI manually,
 but cannot perform those privileged operations.
 

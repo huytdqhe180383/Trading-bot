@@ -144,6 +144,13 @@ Use the UI for:
 4. restart `trading-bot-ui`
 5. have them open the Tailscale-served URL
 
+If you are doing the first install on a fresh Droplet and have root:
+
+```bash
+sudo bash /home/deploy/trading-bot/scripts/server/install_private_ui_root.sh
+sudo bash /home/deploy/trading-bot/scripts/server/install_tailscale_ui_root.sh
+```
+
 ## What To Do When Someone Should Lose Access
 
 1. remove them from `UI_ALLOWED_TAILSCALE_USERS`

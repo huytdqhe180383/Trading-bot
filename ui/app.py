@@ -26,6 +26,7 @@ from config import (
     UI_ADMIN_TAILSCALE_USERS,
     UI_ALLOWED_TAILSCALE_USERS,
     UI_CONTROL_RATE_LIMIT,
+    UI_CONTROL_USE_SUDO,
     UI_ENABLE_CONTROLS,
     UI_LOGIN_RATE_LIMIT,
     UI_PASSWORD,
@@ -67,6 +68,7 @@ class UIAppContext:
     login_rate_limit: int = UI_LOGIN_RATE_LIMIT
     control_rate_limit: int = UI_CONTROL_RATE_LIMIT
     controls_enabled: bool = UI_ENABLE_CONTROLS
+    control_use_sudo: bool = UI_CONTROL_USE_SUDO
     session_max_age_secs: int = UI_SESSION_MAX_AGE_SECS
     trust_tailscale_headers: bool = UI_TRUST_TAILSCALE_HEADERS
     allowed_tailscale_users: frozenset[str] = field(
@@ -426,11 +428,20 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
             _write_audit(context, "control", outcome="rate_limited", request=request, details={"action": action})
             raise HTTPException(status_code=429, detail="Too many control attempts.")
         try:
-            command = build_control_command(action, service_name=context.target_service)
+            command = build_control_command(
+                action,
+                service_name=context.target_service,
+                use_sudo=context.control_use_sudo,
+            )
         except ValueError as exc:
             _write_audit(context, "control", outcome="invalid_action", request=request, details={"action": action})
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        result = run_control_command(action, runner=context.control_runner, service_name=context.target_service)
+        result = run_control_command(
+            action,
+            runner=context.control_runner,
+            service_name=context.target_service,
+            use_sudo=context.control_use_sudo,
+        )
         _write_audit(
             context,
             "control",

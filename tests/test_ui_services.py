@@ -59,6 +59,12 @@ class UIServicesTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_control_command("reload", service_name="trading-bot")
 
+    def test_build_control_command_can_prefix_sudo(self):
+        self.assertEqual(
+            build_control_command("restart", service_name="trading-bot", use_sudo=True),
+            ["sudo", "-n", "systemctl", "restart", "trading-bot"],
+        )
+
     def test_safe_compact_report_path_blocks_invalid_names(self):
         with TemporaryDirectory() as tmp:
             reports_dir = Path(tmp)

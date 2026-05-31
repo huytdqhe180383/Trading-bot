@@ -23,6 +23,7 @@ from config import (
     REPORTS_DIR,
     RESULTS_DIR,
     UI_AUDIT_LOG_PATH,
+    UI_CONTROL_USE_SUDO,
     UI_TARGET_SERVICE,
 )
 from scripts.live_daily_report import load_live_decisions, summarize_frame
@@ -75,11 +76,19 @@ def append_ui_audit_log(
         fh.write(json.dumps(payload, ensure_ascii=True) + "\n")
 
 
-def build_control_command(action: str, service_name: str = UI_TARGET_SERVICE) -> list[str]:
+def build_control_command(
+    action: str,
+    service_name: str = UI_TARGET_SERVICE,
+    *,
+    use_sudo: bool = UI_CONTROL_USE_SUDO,
+) -> list[str]:
     normalized = str(action).strip().lower()
     if normalized not in ALLOWED_CONTROL_ACTIONS:
         raise ValueError(f"Unsupported control action: {action}")
-    return ["systemctl", normalized, service_name]
+    base = ["systemctl", normalized, service_name]
+    if use_sudo:
+        return ["sudo", "-n", *base]
+    return base
 
 
 def run_control_command(
@@ -87,8 +96,9 @@ def run_control_command(
     *,
     runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
     service_name: str = UI_TARGET_SERVICE,
+    use_sudo: bool = UI_CONTROL_USE_SUDO,
 ) -> dict[str, Any]:
-    cmd = build_control_command(action, service_name=service_name)
+    cmd = build_control_command(action, service_name=service_name, use_sudo=use_sudo)
     exec_runner = runner or (
         lambda command: subprocess.run(command, capture_output=True, text=True, check=False, shell=False)
     )

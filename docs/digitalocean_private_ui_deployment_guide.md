@@ -79,6 +79,13 @@ Recommended during the paper-trading week:
 - keep friends in `UI_ALLOWED_TAILSCALE_USERS`
 - keep only your own Tailscale login in `UI_ADMIN_TAILSCALE_USERS`
 
+If you have root access and want the fastest finish path, use the repo scripts:
+
+```bash
+sudo bash /home/deploy/trading-bot/scripts/server/install_private_ui_root.sh
+sudo bash /home/deploy/trading-bot/scripts/server/install_tailscale_ui_root.sh
+```
+
 ## 3. Upload The UI Service File
 
 The repo includes:
@@ -250,10 +257,17 @@ If you enable controls:
 
 Do not allow wildcard `sudo` command patterns.
 
+The repo includes an exact-command allowlist example:
+
+- [trading-bot-ui.sudoers.example](../scripts/server/trading-bot-ui.sudoers.example)
+
 ## 9. Related Files
 
 - [README.md](../README.md)
 - [run_ui.py](../scripts/run_ui.py)
 - [trading-bot-ui.service.example](../scripts/server/trading-bot-ui.service.example)
+- [install_private_ui_root.sh](../scripts/server/install_private_ui_root.sh)
+- [install_tailscale_ui_root.sh](../scripts/server/install_tailscale_ui_root.sh)
+- [trading-bot-ui.sudoers.example](../scripts/server/trading-bot-ui.sudoers.example)
 - [secure_private_ui_security_baseline.md](../report/important/secure_private_ui_security_baseline.md)
 - [shared_private_ui_tailscale_guide.md](./shared_private_ui_tailscale_guide.md)

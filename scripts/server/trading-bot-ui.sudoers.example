@@ -1,0 +1,4 @@
+deploy ALL=(root) NOPASSWD: /bin/systemctl start trading-bot
+deploy ALL=(root) NOPASSWD: /bin/systemctl stop trading-bot
+deploy ALL=(root) NOPASSWD: /bin/systemctl restart trading-bot
+deploy ALL=(root) NOPASSWD: /bin/systemctl status trading-bot
