@@ -164,10 +164,10 @@ operations.
 Current security posture:
 
 - private use only
-- read-only first
+- Tailscale-first shared access
 - Tailscale-only deployment recommended
 - no public ingress
-- controls disabled by default
+- admin-only controls, viewer-safe sharing
 
 Main entrypoints:
 
@@ -181,11 +181,29 @@ Required UI env:
 - `UI_SESSION_SECRET`
 - `UI_BIND_HOST`
 - `UI_PORT`
-- `UI_ENABLE_CONTROLS=false`
+- `UI_ENABLE_CONTROLS`
+- `UI_TRUST_TAILSCALE_HEADERS`
+- `UI_ALLOWED_TAILSCALE_USERS`
+- `UI_ADMIN_TAILSCALE_USERS`
+
+Recommended shared-access model:
+
+- keep the app bound to `127.0.0.1`
+- publish it with `tailscale serve`
+- allow friends through `UI_ALLOWED_TAILSCALE_USERS`
+- keep bot-control rights limited to `UI_ADMIN_TAILSCALE_USERS`
+
+Important scope note:
+
+- this UI manages one server-side bot instance
+- that bot is connected to one OKX account on the server
+- if each friend needs their own separate OKX credentials and their own bot,
+  that is a later multi-tenant architecture change, not this deploy
 
 Related docs:
 
 - `docs/digitalocean_private_ui_deployment_guide.md`
+- `docs/shared_private_ui_tailscale_guide.md`
 - `report/important/secure_private_ui_security_baseline.md`
 
 TradingAgents local research mode:

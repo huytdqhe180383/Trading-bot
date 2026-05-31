@@ -111,6 +111,51 @@ class UIAppTest(unittest.TestCase):
         self.assertEqual(response.headers["location"], "/")
         return csrf
 
+    def _build_tailscale_client(self, *, controls_enabled: bool = False) -> tuple[TestClient, TemporaryDirectory]:
+        tmp = TemporaryDirectory()
+        base = Path(tmp.name)
+        results_dir = base / "results"
+        reports_dir = base / "report"
+        logs_dir = base / "logs"
+        audit_log = logs_dir / "ui_audit.jsonl"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        _write_live_decisions(results_dir)
+        _write_compact_report(reports_dir)
+        (logs_dir / "live_stderr.log").write_text("stderr line 1\nstderr line 2\n", encoding="utf-8")
+        (logs_dir / "live_stdout.log").write_text("stdout line 1\n", encoding="utf-8")
+
+        def fake_status_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="ActiveState=active\nSubState=running\nMainPID=123\nExecMainStartTimestamp=Sat 2026-05-31 09:00:00 +07\n",
+                stderr="",
+            )
+
+        def fake_journal_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(command, 0, stdout="service line 1\n", stderr="")
+
+        def fake_control_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(command, 0, stdout="ok\n", stderr="")
+
+        ctx = UIAppContext(
+            username="owner",
+            password="owner-secret",
+            session_secret="unit-test-secret",
+            results_dir=results_dir,
+            reports_dir=reports_dir,
+            logs_dir=logs_dir,
+            controls_enabled=controls_enabled,
+            audit_log_path=audit_log,
+            status_runner=fake_status_runner,
+            journal_runner=fake_journal_runner,
+            control_runner=fake_control_runner,
+            trust_tailscale_headers=True,
+            allowed_tailscale_users=frozenset({"owner@example.com", "friend@example.com"}),
+            admin_tailscale_users=frozenset({"owner@example.com"}),
+        )
+        return TestClient(create_app(ctx)), tmp
+
     def test_dashboard_redirects_when_unauthenticated(self):
         client, tmp = self._build_client()
         with tmp:
@@ -214,6 +259,53 @@ class UIAppTest(unittest.TestCase):
             csrf = _extract_csrf(dashboard.text)
             response = client.post("/api/control/reload", headers={"x-csrf-token": csrf})
             self.assertEqual(response.status_code, 400)
+
+    def test_tailscale_allowed_user_can_view_without_password_login(self):
+        client, tmp = self._build_tailscale_client()
+        with tmp:
+            response = client.get("/", headers={"Tailscale-User-Login": "friend@example.com"})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("friend@example.com", response.text)
+
+    def test_tailscale_disallowed_user_is_forbidden(self):
+        client, tmp = self._build_tailscale_client()
+        with tmp:
+            response = client.get("/", headers={"Tailscale-User-Login": "intruder@example.com"})
+            self.assertEqual(response.status_code, 403)
+
+    def test_tailscale_trust_without_allowlist_falls_back_to_login(self):
+        client, tmp = self._build_client()
+        with tmp:
+            app_ctx = client.app.state.ctx
+            app_ctx.trust_tailscale_headers = True
+            app_ctx.allowed_tailscale_users = frozenset()
+            app_ctx.admin_tailscale_users = frozenset()
+            response = client.get("/", headers={"Tailscale-User-Login": "friend@example.com"}, follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/login")
+
+    def test_tailscale_viewer_cannot_use_control_endpoint(self):
+        client, tmp = self._build_tailscale_client(controls_enabled=True)
+        with tmp:
+            dashboard = client.get("/", headers={"Tailscale-User-Login": "friend@example.com"})
+            csrf = _extract_csrf(dashboard.text)
+            response = client.post(
+                "/api/control/start",
+                headers={"Tailscale-User-Login": "friend@example.com", "x-csrf-token": csrf},
+            )
+            self.assertEqual(response.status_code, 403)
+
+    def test_tailscale_admin_can_use_control_endpoint(self):
+        client, tmp = self._build_tailscale_client(controls_enabled=True)
+        with tmp:
+            dashboard = client.get("/", headers={"Tailscale-User-Login": "owner@example.com"})
+            csrf = _extract_csrf(dashboard.text)
+            response = client.post(
+                "/api/control/status",
+                headers={"Tailscale-User-Login": "owner@example.com", "x-csrf-token": csrf},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("ok", response.text)
 
 
 if __name__ == "__main__":

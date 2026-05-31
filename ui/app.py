@@ -23,6 +23,8 @@ from config import (
     REPORTS_DIR,
     RESULTS_DIR,
     UI_AUDIT_LOG_PATH,
+    UI_ADMIN_TAILSCALE_USERS,
+    UI_ALLOWED_TAILSCALE_USERS,
     UI_CONTROL_RATE_LIMIT,
     UI_ENABLE_CONTROLS,
     UI_LOGIN_RATE_LIMIT,
@@ -31,6 +33,7 @@ from config import (
     UI_SESSION_SECRET,
     UI_TAIL_LINES_DEFAULT,
     UI_TARGET_SERVICE,
+    UI_TRUST_TAILSCALE_HEADERS,
     UI_USERNAME,
 )
 from ui.services import (
@@ -65,6 +68,13 @@ class UIAppContext:
     control_rate_limit: int = UI_CONTROL_RATE_LIMIT
     controls_enabled: bool = UI_ENABLE_CONTROLS
     session_max_age_secs: int = UI_SESSION_MAX_AGE_SECS
+    trust_tailscale_headers: bool = UI_TRUST_TAILSCALE_HEADERS
+    allowed_tailscale_users: frozenset[str] = field(
+        default_factory=lambda: frozenset(user.strip().lower() for user in UI_ALLOWED_TAILSCALE_USERS if user.strip())
+    )
+    admin_tailscale_users: frozenset[str] = field(
+        default_factory=lambda: frozenset(user.strip().lower() for user in UI_ADMIN_TAILSCALE_USERS if user.strip())
+    )
     audit_log_path: Path = UI_AUDIT_LOG_PATH
     target_service: str = UI_TARGET_SERVICE
     status_runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None
@@ -93,7 +103,50 @@ def _ensure_csrf(request: Request) -> str:
     return token
 
 
+def _session_role(request: Request) -> str:
+    return str(request.session.get("role", "viewer"))
+
+
+def _set_authenticated_session(
+    request: Request,
+    *,
+    username: str,
+    role: str,
+    auth_method: str,
+    display_name: str | None = None,
+) -> None:
+    request.session.clear()
+    request.session["authenticated"] = True
+    request.session["username"] = username
+    request.session["role"] = role
+    request.session["auth_method"] = auth_method
+    request.session["display_name"] = display_name or username
+    request.session["csrf_token"] = mint_csrf_token()
+
+
+def _maybe_authenticate_via_tailscale(request: Request, ctx: UIAppContext) -> None:
+    if request.session.get("authenticated") or not ctx.trust_tailscale_headers:
+        return
+    login = request.headers.get("Tailscale-User-Login", "").strip().lower()
+    if not login:
+        return
+    if not ctx.allowed_tailscale_users:
+        _write_audit(ctx, "tailscale_auth", outcome="misconfigured", request=request, details={"username": login})
+        return
+    if ctx.allowed_tailscale_users and login not in ctx.allowed_tailscale_users:
+        _write_audit(ctx, "tailscale_auth", outcome="denied", request=request, details={"username": login})
+        raise HTTPException(status_code=403, detail="Tailscale user not authorized.")
+    role = "admin" if login in ctx.admin_tailscale_users else "viewer"
+    display_name = request.headers.get("Tailscale-User-Name", "").strip() or login
+    _set_authenticated_session(request, username=login, role=role, auth_method="tailscale", display_name=display_name)
+    _write_audit(ctx, "tailscale_auth", outcome="success", request=request, details={"username": login, "role": role})
+
+
 def _require_page_auth(request: Request, ctx: UIAppContext) -> Response | None:
+    try:
+        _maybe_authenticate_via_tailscale(request, ctx)
+    except HTTPException as exc:
+        return HTMLResponse(str(exc.detail), status_code=exc.status_code)
     if request.session.get("authenticated"):
         return None
     _write_audit(ctx, "page_access", outcome="denied", request=request, details={"path": str(request.url.path)})
@@ -101,10 +154,25 @@ def _require_page_auth(request: Request, ctx: UIAppContext) -> Response | None:
 
 
 def _require_api_auth(request: Request, ctx: UIAppContext) -> None:
+    _maybe_authenticate_via_tailscale(request, ctx)
     if request.session.get("authenticated"):
         return
     _write_audit(ctx, "api_access", outcome="denied", request=request, details={"path": str(request.url.path)})
     raise HTTPException(status_code=401, detail="Authentication required.")
+
+
+def _require_admin(request: Request, ctx: UIAppContext) -> None:
+    _require_api_auth(request, ctx)
+    if _session_role(request) == "admin":
+        return
+    _write_audit(
+        ctx,
+        "admin_access",
+        outcome="denied",
+        request=request,
+        details={"path": str(request.url.path), "username": request.session.get("username", "")},
+    )
+    raise HTTPException(status_code=403, detail="Admin access required.")
 
 
 async def _validate_csrf(request: Request) -> None:
@@ -125,6 +193,9 @@ def _base_template_context(request: Request, ctx: UIAppContext) -> dict[str, Any
         "csrf_token": _ensure_csrf(request),
         "controls_enabled": ctx.controls_enabled,
         "strategy_nav_note": STRATEGY_NAV_NOTE,
+        "session_user": request.session.get("display_name") or request.session.get("username", ""),
+        "session_role": _session_role(request),
+        "is_admin": _session_role(request) == "admin",
     }
 
 
@@ -199,10 +270,7 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
                 {**_base_template_context(request, context), "error": "Invalid credentials."},
                 status_code=401,
             )
-        request.session.clear()
-        request.session["authenticated"] = True
-        request.session["username"] = context.username
-        request.session["csrf_token"] = mint_csrf_token()
+        _set_authenticated_session(request, username=context.username, role="admin", auth_method="password")
         _write_audit(context, "login", outcome="success", request=request, details={"username": username})
         return RedirectResponse(url="/", status_code=303)
 
@@ -349,7 +417,7 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.post("/api/control/{action}")
     async def api_control(action: str, request: Request) -> JSONResponse:
-        _require_api_auth(request, context)
+        _require_admin(request, context)
         await _validate_csrf(request)
         if not context.controls_enabled:
             _write_audit(context, "control", outcome="disabled", request=request, details={"action": action})

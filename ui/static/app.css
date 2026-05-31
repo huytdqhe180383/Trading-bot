@@ -41,6 +41,21 @@ body {
   align-items: center;
 }
 
+.session-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.session-badge {
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 0.86rem;
+}
+
 .brand h1,
 .hero-card h2 {
   margin: 0;
@@ -156,6 +171,20 @@ label span {
   justify-content: space-between;
   gap: 10px;
   margin-top: 10px;
+}
+
+.button-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.inline-form {
+  margin: 0;
+}
+
+.danger-button {
+  color: var(--danger);
+  border-color: rgba(143, 47, 47, 0.3);
 }
 
 .controls-grid,

@@ -12,7 +12,7 @@ Canonical runtime posture:
 - Tailscale-only access
 - phone-friendly browser or PWA shell
 - no public ingress
-- no trade execution controls
+- admin-only service controls
 - no arbitrary shell access
 
 ## Assets To Protect
@@ -22,6 +22,7 @@ Primary assets:
 - exchange credentials
 - `.env` and session secrets
 - trading-bot runtime control
+- Tailscale allowlists and role mapping
 - bot logs and reports
 - live strategy visibility
 
@@ -36,13 +37,13 @@ Secondary assets:
 ### In-scope threats
 
 - an unauthenticated user reaching the UI
-- a tailnet user without the app password trying to browse reports/logs
+- a tailnet user not in the UI allowlist trying to browse reports/logs
 - CSRF against any state-changing endpoint
 - brute-force login attempts
 - path traversal against logs/report download routes
 - accidental exposure of `.env` or arbitrary files
 - accidental public exposure through a reverse proxy or open firewall
-- command injection through future bot-control endpoints
+- command injection through bot-control endpoints
 
 ### Out-of-scope threats
 
@@ -73,7 +74,8 @@ Expected configuration:
 Policy:
 
 - Tailscale presence is necessary but not sufficient
-- UI requires app-layer authentication
+- UI requires app-layer authentication or an explicit trusted Tailscale identity
+- trusted identities must be allowlisted
 
 Mechanisms:
 
@@ -81,15 +83,18 @@ Mechanisms:
 - `UI_PASSWORD`
 - signed session cookie
 - HTTP-only cookie
+- optional `Tailscale-User-Login` trust when the app is bound to localhost and
+  fronted by Tailscale Serve
 
 ### Boundary 3: Authenticated user -> State-changing endpoints
 
-Read-only release policy:
+Current policy:
 
-- all control endpoints remain disabled by default
-- `UI_ENABLE_CONTROLS=false`
+- viewer sessions are read-only
+- admin sessions may use start/stop/restart/status only
+- Tailscale friends should remain viewer-only unless explicitly promoted
 
-Protection model for later phases:
+Protection model:
 
 - auth required
 - CSRF token required
@@ -194,12 +199,14 @@ Runtime audit log:
 Events that must be logged:
 
 - successful login
+- successful Tailscale auto-auth
 - failed login
 - rate-limited login
 - logout
 - denied page access
 - denied API access
-- future control attempts
+- denied Tailscale auth
+- control attempts
 
 Retention note:
 
@@ -216,20 +223,18 @@ Required before deployment:
 2. Tailscale-only access path
 3. app auth configured
 4. session secret configured
-5. controls disabled
+5. control routes role-gated and exact-action only
 6. invalid log/report paths fail closed
 7. no `.env` or arbitrary file exposure
 8. audit log writable
-9. tests for auth, CSRF, path safety, and disabled controls all passing
+9. tests for auth, CSRF, path safety, and admin/viewer controls all passing
 
 ## Phase 3 Control Gate
 
-Controls may be enabled only after:
+Controls may remain enabled only while:
 
-1. at least one stable read-only paper-trading week
-2. exact `sudoers` allowlist is installed
-3. control actions are still limited to `start`, `stop`, `restart`, `status`
-4. audit logging is verified for each control attempt
-5. UI confirmation flow is implemented for stop/restart
-
-Until then, the correct security posture is read-only.
+1. exact `sudoers` allowlist is installed
+2. control actions stay limited to `start`, `stop`, `restart`, `status`
+3. audit logging is verified for each control attempt
+4. Tailscale allowlists are kept current
+5. non-admin users remain viewer-only by default

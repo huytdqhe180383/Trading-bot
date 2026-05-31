@@ -48,12 +48,41 @@
   </article>
   <article class="panel">
     <div class="panel-title">Controls</div>
-    <p class="muted">Read-only phase. Controls are {% if controls_enabled %}enabled{% else %}disabled{% endif %}.</p>
+    {% if controls_enabled and is_admin %}
+    <p class="muted">Admin controls are enabled for this session.</p>
+    <div class="button-stack">
+      <form method="post" action="/api/control/status" class="inline-form" data-control-form="true">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="ghost-button" type="submit">Refresh service</button>
+      </form>
+      <div class="button-row">
+        <form method="post" action="/api/control/start" class="inline-form" data-control-form="true">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="primary-button" type="submit">Start</button>
+        </form>
+        <form method="post" action="/api/control/stop" class="inline-form" data-confirm="Stop the trading bot service?" data-control-form="true">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="ghost-button danger-button" type="submit">Stop</button>
+        </form>
+        <form method="post" action="/api/control/restart" class="inline-form" data-confirm="Restart the trading bot service?" data-control-form="true">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="ghost-button" type="submit">Restart</button>
+        </form>
+      </div>
+    </div>
+    {% elif controls_enabled %}
+    <p class="muted">Controls are enabled, but this session is viewer-only.</p>
+    <div class="button-row">
+      <button class="ghost-button" type="button" disabled>Admin only</button>
+    </div>
+    {% else %}
+    <p class="muted">Read-only phase. Controls are disabled.</p>
     <div class="button-row">
       <button class="ghost-button" type="button" disabled>Start</button>
       <button class="ghost-button" type="button" disabled>Stop</button>
       <button class="ghost-button" type="button" disabled>Restart</button>
     </div>
+    {% endif %}
   </article>
 </section>
 {% endblock %}

@@ -19,6 +19,10 @@
       </div>
     </div>
     {% if request.session.get('authenticated') %}
+    <div class="session-meta">
+      <span class="session-badge">{{ session_user }}</span>
+      <span class="session-badge">{{ session_role }}</span>
+    </div>
     <form method="post" action="/logout" class="logout-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="ghost-button">Log out</button>

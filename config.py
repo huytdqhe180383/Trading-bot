@@ -33,6 +33,13 @@ def _env_str(name: str, default: str) -> str:
         return default
     return raw.strip()
 
+
+def _env_csv(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
 # ============================================================
 # PROJECT PATHS
 # ============================================================
@@ -234,6 +241,9 @@ UI_CONTROL_RATE_LIMIT = _env_int("UI_CONTROL_RATE_LIMIT", 8)
 UI_SESSION_MAX_AGE_SECS = _env_int("UI_SESSION_MAX_AGE_SECS", 8 * 3600)
 UI_AUDIT_LOG_PATH = LOGS_DIR / "ui_audit.jsonl"
 UI_TARGET_SERVICE = _env_str("UI_TARGET_SERVICE", "trading-bot")
+UI_TRUST_TAILSCALE_HEADERS = _env_bool("UI_TRUST_TAILSCALE_HEADERS", False)
+UI_ALLOWED_TAILSCALE_USERS = _env_csv("UI_ALLOWED_TAILSCALE_USERS", ())
+UI_ADMIN_TAILSCALE_USERS = _env_csv("UI_ADMIN_TAILSCALE_USERS", ())
 
 # ============================================================
 # SIGNAL INTEGRATION (Kronos + TradingAgents + Meta-Fusion)

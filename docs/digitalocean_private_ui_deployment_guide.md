@@ -1,6 +1,6 @@
 # DigitalOcean Private UI Deployment Guide
 
-This guide covers the **read-only** private web UI for the trading bot. The
+This guide covers the private web UI for the trading bot. The
 intended use is:
 
 - private access only
@@ -17,9 +17,9 @@ Current phase:
 
 - login-protected dashboard
 - reports/history/logs pages
-- JSON APIs for the same read-only views
+- JSON APIs for the same views
 - audit logging
-- controls shipped in code but **disabled by default**
+- optional admin-only start/stop/restart controls
 
 Out of scope for this phase:
 
@@ -57,7 +57,10 @@ UI_BIND_HOST=127.0.0.1
 UI_PORT=8080
 UI_TAIL_LINES_DEFAULT=200
 UI_LOGIN_RATE_LIMIT=5
-UI_ENABLE_CONTROLS=false
+UI_ENABLE_CONTROLS=true
+UI_TRUST_TAILSCALE_HEADERS=true
+UI_ALLOWED_TAILSCALE_USERS=you@example.com,friend1@example.com,friend2@example.com
+UI_ADMIN_TAILSCALE_USERS=you@example.com
 ```
 
 Recommended secret generation:
@@ -69,7 +72,12 @@ print(secrets.token_urlsafe(48))
 PY
 ```
 
-Keep `UI_ENABLE_CONTROLS=false` during the paper-trading week.
+Recommended during the paper-trading week:
+
+- keep `UI_BIND_HOST=127.0.0.1`
+- keep `UI_TRUST_TAILSCALE_HEADERS=true`
+- keep friends in `UI_ALLOWED_TAILSCALE_USERS`
+- keep only your own Tailscale login in `UI_ADMIN_TAILSCALE_USERS`
 
 ## 3. Upload The UI Service File
 
@@ -149,12 +157,19 @@ For the paper-trading week, keep the simpler and safer option:
 Example:
 
 ```bash
-sudo tailscale serve --bg 8080
+sudo tailscale serve --bg --https=443 http://127.0.0.1:8080
 ```
 
 Then open the Tailscale-served URL from your phone.
 
 Do **not** use Tailscale Funnel for this UI.
+
+For friend access, prefer:
+
+1. same-tailnet access, or
+2. Tailscale machine/service sharing
+
+Do not widen access by binding the UI to `0.0.0.0`.
 
 ## 6. Useful Runtime Commands
 
@@ -219,16 +234,14 @@ Before trusting it for regular use, confirm:
 7. logging out clears access
 8. stopping cellular/Wi-Fi path outside Tailscale blocks access
 
-## 8. Future Controls Phase
+## 8. Controls Safety Rules
 
-Control routes exist in code, but they should remain disabled until the
-read-only UI has been stable for your paper-trading week.
-
-When you later enable controls:
+If you enable controls:
 
 - keep CSRF enabled
-- keep app auth enabled
+- keep app auth or Tailscale identity auth enabled
 - use exact-command `sudoers` allowlisting only
+- keep friends as viewer-only users
 - allow only:
   - `systemctl status trading-bot`
   - `systemctl start trading-bot`
@@ -243,3 +256,4 @@ Do not allow wildcard `sudo` command patterns.
 - [run_ui.py](../scripts/run_ui.py)
 - [trading-bot-ui.service.example](../scripts/server/trading-bot-ui.service.example)
 - [secure_private_ui_security_baseline.md](../report/important/secure_private_ui_security_baseline.md)
+- [shared_private_ui_tailscale_guide.md](./shared_private_ui_tailscale_guide.md)
