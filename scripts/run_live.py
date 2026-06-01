@@ -75,7 +75,11 @@ from config import (
     NAV_SCALED_CAP_MIN_WEIGHT,
 )
 from data.live_feed import CCXTExchangeGateway
-from risk.risk_constraints import apply_stress_risk_governor
+from risk.risk_constraints import (
+    apply_position_cap_mode,
+    apply_stress_risk_governor,
+    compute_nav_scaled_max_asset_weight as _compute_nav_scaled_max_asset_weight,
+)
 from tradingbot.runtime.artifacts import (
     append_csv_row,
     create_numbered_daily_dir,
@@ -84,6 +88,10 @@ from tradingbot.runtime.artifacts import (
 )
 
 load_dotenv()
+
+
+def get_live_session_tz() -> ZoneInfo:
+    return ZoneInfo(LIVE_SESSION_TIMEZONE)
 
 
 def compute_nav_scaled_max_asset_weight(nav: float) -> float:
