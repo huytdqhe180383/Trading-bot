@@ -1,5 +1,13 @@
 # AGENTS.md
 
+## Git Workflow Rules
+
+For every work session:
+
+1. Create or switch to a dedicated working branch for that session.
+2. Commit the completed session changes with a clear message.
+3. Push the session branch to the remote before ending the session.
+
 ## Report And Result Storage Rules
 
 All future agents must keep reports and generated result snapshots under the canonical categorized folders below. Do not create new ad-hoc session folders such as `report/<date>_session/`.

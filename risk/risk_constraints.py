@@ -31,6 +31,53 @@ def apply_per_asset_cap(weights: np.ndarray, max_asset_weight: float) -> np.ndar
     return np.append(capped_assets, cash).astype(np.float32)
 
 
+def compute_nav_scaled_max_asset_weight(
+    nav: float,
+    *,
+    min_nav: float,
+    max_nav: float,
+    min_weight: float,
+    max_weight: float,
+) -> float:
+    low_nav = float(min(min_nav, max_nav))
+    high_nav = float(max(min_nav, max_nav))
+    low_weight = float(min(min_weight, max_weight))
+    high_weight = float(max(min_weight, max_weight))
+    if nav <= low_nav:
+        return low_weight
+    if nav >= high_nav:
+        return high_weight
+    span = max(high_nav - low_nav, 1e-9)
+    x = float((nav - low_nav) / span)
+    smooth = x * x * (3.0 - 2.0 * x)
+    return float(low_weight + (high_weight - low_weight) * smooth)
+
+
+def apply_position_cap_mode(
+    *,
+    weights: np.ndarray,
+    n_assets: int,
+    nav: float,
+    position_cap_mode: str,
+    base_max_asset_weight: float,
+    nav_scaled_cap_min_nav: float,
+    nav_scaled_cap_max_nav: float,
+    nav_scaled_cap_min_weight: float,
+) -> tuple[np.ndarray, float]:
+    normalized = normalize_weights(weights, n_assets)
+    applied_cap = float(base_max_asset_weight)
+    if str(position_cap_mode).strip().lower() == "smooth_nav":
+        applied_cap = compute_nav_scaled_max_asset_weight(
+            nav,
+            min_nav=nav_scaled_cap_min_nav,
+            max_nav=nav_scaled_cap_max_nav,
+            min_weight=nav_scaled_cap_min_weight,
+            max_weight=base_max_asset_weight,
+        )
+    capped = apply_per_asset_cap(normalized, max_asset_weight=applied_cap)
+    return normalize_weights(capped, n_assets), float(applied_cap)
+
+
 def apply_min_cash_floor(weights: np.ndarray, min_cash_floor: float) -> np.ndarray:
     out = np.asarray(weights, dtype=np.float32).copy()
     min_cash = float(np.clip(min_cash_floor, 0.0, 1.0))

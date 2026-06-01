@@ -21,6 +21,7 @@ tradingbot/runtime/artifacts.py -> shared report/result session artifact helpers
 tradingbot/reports/live_daily.py -> compact live report builder used by CLI and UI
 tradingbot/apps/                -> stable lazy application entrypoints
 backtest.py                     -> ablations + realism profiles + reports
+environment/trading_env.py      -> `SpotPortfolioEnv` generic spot portfolio env
 scripts/run_live.py             -> canonical live/testnet execution runner
 run_live.py                     -> compatibility wrapper to scripts/run_live.py
 ```
