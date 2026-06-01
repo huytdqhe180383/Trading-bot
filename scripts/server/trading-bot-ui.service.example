@@ -1,0 +1,18 @@
+[Unit]
+Description=Trading Bot Private UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy/trading-bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/deploy/trading-bot/.venv/bin/python scripts/run_ui.py
+Restart=always
+RestartSec=15
+StandardOutput=append:/home/deploy/trading-bot/logs/ui_stdout.log
+StandardError=append:/home/deploy/trading-bot/logs/ui_stderr.log
+
+[Install]
+WantedBy=multi-user.target

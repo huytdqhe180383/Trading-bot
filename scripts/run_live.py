@@ -5,13 +5,13 @@ Canonical live execution runner (OKX-first, CCXT, fusion-enabled).
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -35,6 +35,7 @@ from config import (
     LIVE_MAX_DATA_STALENESS_SECS,
     LIVE_REQUIRE_NATIVE_KRONOS,
     LIVE_REQUIRE_NATIVE_TRADINGAGENTS,
+    LIVE_SESSION_TIMEZONE,
     LOGS_DIR,
     MAX_ASSET_WEIGHT,
     MAX_PORTFOLIO_TURNOVER,
@@ -74,10 +75,12 @@ from config import (
     NAV_SCALED_CAP_MIN_WEIGHT,
 )
 from data.live_feed import CCXTExchangeGateway
-from risk.risk_constraints import (
-    apply_position_cap_mode,
-    apply_stress_risk_governor,
-    compute_nav_scaled_max_asset_weight as _compute_nav_scaled_max_asset_weight,
+from risk.risk_constraints import apply_stress_risk_governor
+from tradingbot.runtime.artifacts import (
+    append_csv_row,
+    create_numbered_daily_dir,
+    write_json_artifact,
+    write_live_session_summary as _write_live_session_summary,
 )
 
 load_dotenv()
@@ -94,60 +97,19 @@ def compute_nav_scaled_max_asset_weight(nav: float) -> float:
 
 
 def create_live_session_dir(results_dir: Path = RESULTS_DIR, *, run_date: str | None = None) -> Path:
-    day = run_date or datetime.now().strftime("%Y-%m-%d")
-    daily_dir = Path(results_dir) / "daily" / day
-    daily_dir.mkdir(parents=True, exist_ok=True)
-    existing_numbers = [
-        int(child.name)
-        for child in daily_dir.iterdir()
-        if child.is_dir() and child.name.isdigit()
-    ]
-    next_number = max(existing_numbers, default=0) + 1
-    session_dir = daily_dir / str(next_number)
-    session_dir.mkdir(parents=True, exist_ok=False)
-    return session_dir
+    return create_numbered_daily_dir(results_dir, run_date, tz_name=LIVE_SESSION_TIMEZONE)
 
 
 def write_live_session_metadata(session_dir: Path, metadata: dict[str, Any]) -> None:
-    serializable = {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in metadata.items()
-    }
-    (session_dir / "live_session_metadata.json").write_text(
-        json.dumps(serializable, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    write_json_artifact(Path(session_dir) / "live_session_metadata.json", metadata)
 
 
 def append_live_session_row(session_csv_path: Path, row: dict[str, Any]) -> None:
-    session_csv_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([row]).to_csv(
-        session_csv_path,
-        mode="a",
-        header=not session_csv_path.exists(),
-        index=False,
-    )
+    append_csv_row(session_csv_path, row)
 
 
 def write_live_session_summary(session_dir: Path, rows: list[dict[str, Any]]) -> None:
-    if not rows:
-        return
-    df = pd.DataFrame(rows)
-    summary = {
-        "rows": int(len(df)),
-        "ok_rows": int((df.get("status", pd.Series(dtype=str)) == "ok").sum()) if "status" in df else 0,
-        "blocked_rows": int((df.get("status", pd.Series(dtype=str)) == "blocked").sum()) if "status" in df else 0,
-        "orders_submitted": int(df.get("orders_submitted", pd.Series(dtype=float)).fillna(0).sum()) if "orders_submitted" in df else 0,
-        "orders_filled": int(df.get("orders_filled", pd.Series(dtype=float)).fillna(0).sum()) if "orders_filled" in df else 0,
-        "max_nav": float(df.get("nav", pd.Series(dtype=float)).max()) if "nav" in df else 0.0,
-        "min_nav": float(df.get("nav", pd.Series(dtype=float)).min()) if "nav" in df else 0.0,
-        "last_nav": float(df.get("nav", pd.Series(dtype=float)).iloc[-1]) if "nav" in df and len(df) else 0.0,
-        "last_status": str(df.get("status", pd.Series(dtype=str)).iloc[-1]) if "status" in df and len(df) else "",
-    }
-    (session_dir / "live_session_summary.json").write_text(
-        json.dumps(summary, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    _write_live_session_summary(session_dir, rows)
 
 
 def compute_portfolio_weights(
@@ -501,6 +463,7 @@ def main() -> None:
     parser.set_defaults(enable_kronos=ENABLE_KRONOS, enable_ta=ENABLE_TRADINGAGENTS)
     args = parser.parse_args()
     args.model_dir = resolve_live_model_dir(args.model_dir)
+    session_tz = get_live_session_tz()
 
     log_file = LOGS_DIR / f"run_{args.exchange}_{args.mode}.log"
     logger.add(log_file, rotation="10 MB", retention="30 days")
@@ -509,7 +472,7 @@ def main() -> None:
     write_live_session_metadata(
         session_dir,
         {
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(session_tz).isoformat(),
             "exchange": args.exchange,
             "mode": args.mode,
             "model_dir": args.model_dir,
@@ -521,6 +484,7 @@ def main() -> None:
             "bootstrap_usdt": args.bootstrap_usdt,
             "bootstrap_btc": args.bootstrap_btc,
             "bootstrap_eth": args.bootstrap_eth,
+            "session_timezone": LIVE_SESSION_TIMEZONE,
         },
     )
     logger.info(
@@ -656,14 +620,23 @@ def main() -> None:
         if safety_reasons:
             for reason in safety_reasons:
                 logger.warning(f"SAFETY_GATE {reason}")
+            unrealized_pnl_usd = nav - (initial_nav or nav)
+            unrealized_pnl_pct = (
+                (unrealized_pnl_usd / initial_nav * 100.0)
+                if (initial_nav and initial_nav > 0)
+                else 0.0
+            )
             row = {
                 "timestamp_utc": ts.isoformat(),
+                "timestamp_local": ts.astimezone(session_tz).isoformat(),
                 "cycle": cycle,
                 "exchange": args.exchange,
                 "mode": args.mode,
                 "nav": nav,
-                "pnl_usd": nav - (initial_nav or nav),
-                "pnl_pct": ((nav - initial_nav) / initial_nav * 100.0) if (initial_nav and initial_nav > 0) else 0.0,
+                "unrealized_pnl_usd": unrealized_pnl_usd,
+                "unrealized_pnl_pct": unrealized_pnl_pct,
+                "pnl_usd": unrealized_pnl_usd,
+                "pnl_pct": unrealized_pnl_pct,
                 "btc_weight": float(exec_weights[0]),
                 "eth_weight": float(exec_weights[1]),
                 "cash_weight": float(exec_weights[2]),
@@ -708,18 +681,25 @@ def main() -> None:
             except Exception as exc:
                 logger.error(f"Order failed for {order['symbol']} {order['side']}: {exc}")
 
-        pnl_usd = nav - (initial_nav or nav)
-        pnl_pct = (pnl_usd / initial_nav * 100.0) if (initial_nav and initial_nav > 0) else 0.0
-        logger.info(f"NAV=${nav:,.2f} | Session PnL=${pnl_usd:,.2f} ({pnl_pct:.2f}%)")
+        unrealized_pnl_usd = nav - (initial_nav or nav)
+        unrealized_pnl_pct = (
+            (unrealized_pnl_usd / initial_nav * 100.0) if (initial_nav and initial_nav > 0) else 0.0
+        )
+        logger.info(
+            f"NAV=${nav:,.2f} | Session Unrealized PnL=${unrealized_pnl_usd:,.2f} ({unrealized_pnl_pct:.2f}%)"
+        )
 
         row = {
             "timestamp_utc": ts.isoformat(),
+            "timestamp_local": ts.astimezone(session_tz).isoformat(),
             "cycle": cycle,
             "exchange": args.exchange,
             "mode": args.mode,
             "nav": nav,
-            "pnl_usd": pnl_usd,
-            "pnl_pct": pnl_pct,
+            "unrealized_pnl_usd": unrealized_pnl_usd,
+            "unrealized_pnl_pct": unrealized_pnl_pct,
+            "pnl_usd": unrealized_pnl_usd,
+            "pnl_pct": unrealized_pnl_pct,
             "btc_weight": float(exec_weights[0]),
             "eth_weight": float(exec_weights[1]),
             "cash_weight": float(exec_weights[2]),

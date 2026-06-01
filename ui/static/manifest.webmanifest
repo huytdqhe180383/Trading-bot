@@ -1,0 +1,16 @@
+{
+  "name": "Trading Bot Console",
+  "short_name": "Bot UI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3efe5",
+  "theme_color": "#10231d",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

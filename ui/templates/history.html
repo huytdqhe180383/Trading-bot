@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}History | Trading Bot UI{% endblock %}
+{% block content %}
+<section class="hero-card">
+  <div>
+    <div class="eyebrow">Session continuity</div>
+    <h2>Recent sessions and rows</h2>
+    <p class="muted">{{ note }}</p>
+  </div>
+</section>
+
+{% if freshness.is_stale %}
+<section class="alert">
+  Latest recorded cycle is stale. Last update: {{ freshness.latest_timestamp_local or 'n/a' }}. Age: {{ freshness.age_text }}.
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-title">Recent sessions</div>
+  {% if sessions %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Session</th>
+          <th>First UTC</th>
+          <th>Last UTC</th>
+          <th>Start NAV</th>
+          <th>End NAV</th>
+          <th>Rows</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for session in sessions %}
+        <tr>
+          <td>{{ session.session_dir }}</td>
+          <td>{{ session.first_timestamp_utc }}</td>
+          <td>{{ session.last_timestamp_utc }}</td>
+          <td>${{ '%.2f'|format(session.first_nav or 0) }}</td>
+          <td>${{ '%.2f'|format(session.last_nav or 0) }}</td>
+          <td>{{ session.rows }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No recorded sessions yet.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-title">Recent decisions</div>
+  {% if rows %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Local time</th>
+          <th>Cycle</th>
+          <th>Action</th>
+          <th>NAV</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.timestamp_local }}</td>
+          <td>{{ row.cycle }}</td>
+          <td>{{ row.ui_action }}</td>
+          <td>${{ '%.2f'|format(row.nav or 0) }}</td>
+          <td>{{ row.status or 'n/a' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No decision rows available.</p>
+  {% endif %}
+</section>
+{% endblock %}

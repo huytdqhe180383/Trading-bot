@@ -18,7 +18,111 @@ Use this during the planned `1 week` paper-trading period.
 
 ---
 
-## 1. Connect To The Server
+## 1. Most Useful Commands First
+
+If you use only a few commands during the paper-trading week, use these.
+
+### SSH in
+
+```powershell
+ssh deploy@174.138.26.180
+```
+
+### One-screen monitor snapshot
+
+```bash
+/home/deploy/trading-bot/scripts/server/live_monitor.sh
+```
+
+### Auto-refreshing monitor
+
+```bash
+/home/deploy/trading-bot/scripts/server/live_monitor.sh --follow
+```
+
+### Daily report for today in Asia/Bangkok
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --date "$(TZ=Asia/Bangkok date +%F)"
+```
+
+### Daily report and export compact files
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --date "$(TZ=Asia/Bangkok date +%F)" --export
+```
+
+### Rolling last 24 hours report
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --last-hours 24
+```
+
+### Full history report since the server paper run began
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --full-history
+```
+
+### Check bot status
+
+```bash
+sudo systemctl status trading-bot --no-pager
+```
+
+### Restart bot
+
+```bash
+sudo systemctl restart trading-bot
+```
+
+### Read recent service logs
+
+```bash
+sudo journalctl -u trading-bot -n 200 --no-pager
+```
+
+### Tail app stderr
+
+```bash
+tail -n 100 /home/deploy/trading-bot/logs/live_stderr.log
+```
+
+### Check private UI status
+
+```bash
+sudo systemctl status trading-bot-ui --no-pager
+```
+
+### Restart private UI
+
+```bash
+sudo systemctl restart trading-bot-ui
+```
+
+### Tail private UI service logs
+
+```bash
+sudo journalctl -u trading-bot-ui -n 200 --no-pager
+```
+
+### Tail private UI audit log
+
+```bash
+tail -n 100 /home/deploy/trading-bot/logs/ui_audit.jsonl
+```
+
+---
+
+## 2. Connect To The Server
 
 From your Windows PC:
 
@@ -34,7 +138,7 @@ ssh root@174.138.26.180
 
 ---
 
-## 2. Upload Files From Your PC To The Server
+## 3. Upload Files From Your PC To The Server
 
 ### Upload `.env`
 
@@ -72,6 +176,12 @@ scp "K:\BTC-ETH Trading\requirements-live.txt" deploy@174.138.26.180:/home/deplo
 scp "K:\BTC-ETH Trading\scripts\server\live_monitor.sh" deploy@174.138.26.180:/home/deploy/trading-bot/scripts/server/live_monitor.sh
 ```
 
+### Upload daily report script
+
+```powershell
+scp "K:\BTC-ETH Trading\scripts\live_daily_report.py" deploy@174.138.26.180:/home/deploy/trading-bot/scripts/live_daily_report.py
+```
+
 ### Upload this cheat sheet
 
 ```powershell
@@ -80,7 +190,7 @@ scp "K:\BTC-ETH Trading\docs\digitalocean_paper_trading_command_cheatsheet.md" d
 
 ---
 
-## 3. Basic Server Navigation
+## 4. Basic Server Navigation
 
 After SSH login:
 
@@ -108,7 +218,7 @@ cd /home/deploy/trading-bot/results
 
 ---
 
-## 4. Install Or Reinstall Live Dependencies
+## 5. Install Or Reinstall Live Dependencies
 
 Use this on the server:
 
@@ -144,7 +254,7 @@ PY
 
 ---
 
-## 5. Verify Files Exist
+## 6. Verify Files Exist
 
 ### Verify live baseline model
 
@@ -166,7 +276,7 @@ ls -la /home/deploy/trading-bot/scripts/server/live_monitor.sh
 
 ---
 
-## 6. Make The Monitor Script Executable
+## 7. Make The Monitor Script Executable
 
 Run once on the server:
 
@@ -177,7 +287,7 @@ chmod +x /home/deploy/trading-bot/scripts/server/live_monitor.sh
 
 ---
 
-## 7. Dry Run Commands
+## 8. Dry Run Commands
 
 ### One-cycle dry run with bootstrap cash
 
@@ -197,7 +307,7 @@ python run_live.py --exchange okx --mode testnet --dry-run --max-cycles 1 --boot
 
 ---
 
-## 8. Paper Trading Commands
+## 9. Paper Trading Commands
 
 ### Short test: 3 cycles
 
@@ -225,7 +335,7 @@ python run_live.py --exchange okx --mode testnet --disable-kronos --disable-trad
 
 ---
 
-## 9. Service Management
+## 10. Service Management
 
 ### Start the service
 
@@ -271,7 +381,7 @@ sudo systemctl daemon-reload
 
 ---
 
-## 10. Service Logs
+## 11. Service Logs
 
 ### Follow the service log
 
@@ -302,7 +412,7 @@ Then log out and SSH back in.
 
 ---
 
-## 11. App Logs
+## 12. App Logs
 
 ### Follow stdout
 
@@ -330,7 +440,7 @@ tail -n 100 /home/deploy/trading-bot/logs/live_stderr.log
 
 ---
 
-## 12. Friendlier Monitoring
+## 13. Friendlier Monitoring
 
 ### One-screen snapshot
 
@@ -348,7 +458,7 @@ This is the command you will likely use most during the 1-week paper trial.
 
 ---
 
-## 13. Results And Session Files
+## 14. Results And Session Files
 
 ### List daily result folders
 
@@ -380,9 +490,41 @@ latest="$(find /home/deploy/trading-bot/results/daily -mindepth 2 -maxdepth 2 -t
 latest="$(find /home/deploy/trading-bot/results/daily -mindepth 2 -maxdepth 2 -type d | sort | tail -n 1)"; tail -n 20 "$latest"/live_trade_decisions_*.csv
 ```
 
+### Daily report for today in Asia/Bangkok
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --date "$(TZ=Asia/Bangkok date +%F)"
+```
+
+### Daily report for a specific day
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --date 2026-05-31
+```
+
+### Rolling last 24 hours report
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --last-hours 24
+```
+
+### Full history report
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --full-history
+```
+
 ---
 
-## 14. Check Current Resource Usage
+## 15. Check Current Resource Usage
 
 ### Memory
 
@@ -410,7 +552,7 @@ htop
 
 ---
 
-## 15. Reboot And Shutdown
+## 16. Reboot And Shutdown
 
 ### Reboot the server
 
@@ -426,7 +568,7 @@ sudo shutdown now
 
 ---
 
-## 16. Edit Important Files
+## 17. Edit Important Files
 
 ### Edit `.env`
 
@@ -448,7 +590,7 @@ nano /home/deploy/trading-bot/scripts/run_live.py
 
 ---
 
-## 17. Pull Code Updates
+## 18. Pull Code Updates
 
 If the server repo is connected to Git:
 
@@ -473,7 +615,7 @@ sudo systemctl restart trading-bot
 
 ---
 
-## 18. 1-Week Paper Trading Routine
+## 19. 1-Week Paper Trading Routine
 
 Recommended daily commands during the test week:
 
@@ -481,6 +623,22 @@ Recommended daily commands during the test week:
 
 ```bash
 /home/deploy/trading-bot/scripts/server/live_monitor.sh
+```
+
+### Daily summary
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --date "$(TZ=Asia/Bangkok date +%F)"
+```
+
+### Daily summary plus compact export
+
+```bash
+cd /home/deploy/trading-bot
+source .venv/bin/activate
+python scripts/live_daily_report.py --date "$(TZ=Asia/Bangkok date +%F)" --export
 ```
 
 ### If something looks wrong
@@ -505,7 +663,7 @@ latest="$(find /home/deploy/trading-bot/results/daily -mindepth 2 -maxdepth 2 -t
 
 ---
 
-## 19. Current Recommended Operating Mode
+## 20. Current Recommended Operating Mode
 
 For this week, keep it exactly here:
 
@@ -519,56 +677,4 @@ For this week, keep it exactly here:
 Do not switch to live trading yet.
 
 ---
-
-## 20. Most Useful Commands Only
-
-If you want the shortest possible list, use these:
-
-### SSH in
-
-```powershell
-ssh deploy@174.138.26.180
-```
-
-### Monitor snapshot
-
-```bash
-/home/deploy/trading-bot/scripts/server/live_monitor.sh
-```
-
-### Monitor continuously
-
-```bash
-/home/deploy/trading-bot/scripts/server/live_monitor.sh --follow
-```
-
-### Restart bot
-
-```bash
-sudo systemctl restart trading-bot
-```
-
-### Check status
-
-```bash
-sudo systemctl status trading-bot --no-pager
-```
-
-### Read recent service logs
-
-```bash
-sudo journalctl -u trading-bot -n 200 --no-pager
-```
-
-### Tail app stderr
-
-```bash
-tail -n 100 /home/deploy/trading-bot/logs/live_stderr.log
-```
-
-### Read latest session summary
-
-```bash
-latest="$(find /home/deploy/trading-bot/results/daily -mindepth 2 -maxdepth 2 -type d | sort | tail -n 1)"; cat "$latest/live_session_summary.json"
-```
 
