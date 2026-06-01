@@ -9,6 +9,12 @@
   </div>
 </section>
 
+{% if freshness.is_stale %}
+<section class="alert">
+  Latest recorded cycle is stale. Last update: {{ freshness.latest_timestamp_local or 'n/a' }}. Age: {{ freshness.age_text }}.
+</section>
+{% endif %}
+
 <section class="panel">
   <div class="panel-title">Recent sessions</div>
   {% if sessions %}

@@ -130,12 +130,56 @@ class UIServicesTest(unittest.TestCase):
                 results_dir=results_dir,
                 reports_dir=reports_dir,
                 status_runner=fake_status_runner,
+                now_utc=pd.Timestamp("2026-05-30T19:00:00+00:00"),
             )
             self.assertEqual(payload["status"]["active_state"], "active")
             self.assertEqual(payload["today"]["summary"]["rows"], 2)
             self.assertEqual(payload["full_history"]["summary"]["orders_filled"], 1)
             self.assertAlmostEqual(payload["today"]["summary"]["unrealized_pnl_usd"], 150.0, places=6)
             self.assertEqual(payload["note"], STRATEGY_NAV_NOTE)
+
+    def test_build_dashboard_payload_marks_active_service_stale_when_rows_are_old(self):
+        with TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "results"
+            reports_dir = Path(tmp) / "report"
+            _write_live_decisions(results_dir)
+
+            def fake_status_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout="ActiveState=active\nSubState=running\nMainPID=123\nExecMainStartTimestamp=Sun 2026-06-01 00:00:00 +07\n",
+                    stderr="",
+                )
+
+            payload = build_dashboard_payload(
+                tz_name="Asia/Bangkok",
+                results_dir=results_dir,
+                reports_dir=reports_dir,
+                status_runner=fake_status_runner,
+                now_utc=pd.Timestamp("2026-06-01T12:00:00+00:00"),
+            )
+
+            self.assertEqual(payload["status"]["active_state"], "active")
+            self.assertEqual(payload["status"]["ui_state"], "stale")
+            self.assertTrue(payload["freshness"]["is_stale"])
+            self.assertGreater(payload["freshness"]["age_seconds"], 0)
+            self.assertFalse(payload["freshness"]["today_has_rows"])
+
+    def test_build_history_payload_includes_freshness_summary(self):
+        with TemporaryDirectory() as tmp:
+            results_dir = Path(tmp)
+            _write_live_decisions(results_dir, session="1")
+
+            payload = build_history_payload(
+                results_dir=results_dir,
+                tz_name="Asia/Bangkok",
+                now_utc=pd.Timestamp("2026-06-01T12:00:00+00:00"),
+            )
+
+            self.assertIn("freshness", payload)
+            self.assertTrue(payload["freshness"]["is_stale"])
+            self.assertEqual(payload["freshness"]["status"], "stale")
 
 
 if __name__ == "__main__":

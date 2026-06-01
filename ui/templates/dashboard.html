@@ -7,16 +7,31 @@
     <h2>Live bot status</h2>
     <p class="muted">{{ note }}</p>
   </div>
-  <div class="status-pill {{ 'running' if status.active_state == 'active' else 'stopped' }}">
+  <div class="status-pill {{ 'stale' if status.ui_state == 'stale' else ('running' if status.active_state == 'active' else 'stopped') }}">
     {{ status.active_state }} / {{ status.sub_state }}
   </div>
 </section>
+
+{% if freshness.is_stale %}
+<section class="alert">
+  No new cycle has been recorded since {{ freshness.latest_timestamp_local or 'n/a' }}. Latest cycle age: {{ freshness.age_text }}.
+</section>
+{% elif not freshness.today_has_rows %}
+<section class="notice">
+  No cycle has been recorded for today yet. Latest row: {{ freshness.latest_timestamp_local or 'n/a' }}.
+</section>
+{% endif %}
 
 <section class="card-grid">
   <article class="panel metric">
     <div class="label">Latest NAV</div>
     <div class="value">${{ '%.2f'|format((latest_row.nav if latest_row else 0) or 0) }}</div>
     <div class="muted">Latest cycle at {{ latest_row.timestamp_local if latest_row else 'n/a' }}</div>
+  </article>
+  <article class="panel metric">
+    <div class="label">Latest Cycle Age</div>
+    <div class="value">{{ freshness.age_text }}</div>
+    <div class="muted">{{ freshness.latest_timestamp_local if freshness.latest_timestamp_local else 'No recorded cycles yet' }}</div>
   </article>
   <article class="panel metric">
     <div class="label">Today Unrealized PnL</div>

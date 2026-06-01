@@ -20,6 +20,7 @@ import pandas as pd
 from config import (
     LIVE_SESSION_TIMEZONE,
     LOGS_DIR,
+    REBALANCE_INTERVAL_SECS,
     REPORTS_DIR,
     RESULTS_DIR,
     UI_AUDIT_LOG_PATH,
@@ -34,6 +35,7 @@ ALLOWED_LOG_SOURCES = {
     "stdout": LOGS_DIR / "live_stdout.log",
 }
 STRATEGY_NAV_NOTE = "Strategy NAV excludes non-strategy assets such as OKB."
+LIVE_ROW_STALE_AFTER_SECS = max(REBALANCE_INTERVAL_SECS * 2, REBALANCE_INTERVAL_SECS + 900)
 
 
 class InMemoryRateLimiter:
@@ -222,6 +224,67 @@ def _jsonable_record(record: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _coerce_utc_timestamp(value: Any) -> pd.Timestamp | None:
+    if value is None:
+        return None
+    ts = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(ts):
+        return None
+    return pd.Timestamp(ts)
+
+
+def _format_age_text(age_seconds: int | None) -> str:
+    if age_seconds is None:
+        return "n/a"
+    if age_seconds < 60:
+        return f"{age_seconds}s"
+    minutes, seconds = divmod(age_seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes}m"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours}h"
+
+
+def build_live_freshness_payload(
+    latest_row: dict[str, Any] | None,
+    *,
+    tz_name: str,
+    now_utc: pd.Timestamp | None = None,
+    stale_after_seconds: int = LIVE_ROW_STALE_AFTER_SECS,
+) -> dict[str, Any]:
+    now_ts = _coerce_utc_timestamp(now_utc) or pd.Timestamp.now(tz="UTC")
+    latest_ts = _coerce_utc_timestamp((latest_row or {}).get("timestamp_utc"))
+    if latest_ts is None:
+        return {
+            "status": "unavailable",
+            "is_stale": True,
+            "age_seconds": None,
+            "age_text": "n/a",
+            "stale_after_seconds": int(stale_after_seconds),
+            "latest_timestamp_utc": None,
+            "latest_timestamp_local": None,
+            "today_has_rows": False,
+        }
+    age_seconds = max(0, int((now_ts - latest_ts).total_seconds()))
+    latest_local = latest_ts.tz_convert(ZoneInfo(tz_name))
+    today_local = now_ts.tz_convert(ZoneInfo(tz_name)).strftime("%Y-%m-%d")
+    latest_local_day = latest_local.strftime("%Y-%m-%d")
+    is_stale = age_seconds > int(stale_after_seconds)
+    return {
+        "status": "stale" if is_stale else "fresh",
+        "is_stale": is_stale,
+        "age_seconds": age_seconds,
+        "age_text": _format_age_text(age_seconds),
+        "stale_after_seconds": int(stale_after_seconds),
+        "latest_timestamp_utc": latest_ts.isoformat(),
+        "latest_timestamp_local": latest_local.isoformat(),
+        "today_has_rows": latest_local_day == today_local,
+    }
+
+
 def _get_filtered_frame(
     df: pd.DataFrame,
     *,
@@ -319,10 +382,16 @@ def build_history_payload(
     results_dir: Path = RESULTS_DIR,
     limit_rows: int = 50,
     limit_sessions: int = 20,
+    now_utc: pd.Timestamp | None = None,
 ) -> dict[str, Any]:
     df = load_live_decisions(Path(results_dir))
     if df.empty:
-        return {"sessions": [], "rows": [], "note": STRATEGY_NAV_NOTE}
+        return {
+            "sessions": [],
+            "rows": [],
+            "note": STRATEGY_NAV_NOTE,
+            "freshness": build_live_freshness_payload(None, tz_name=tz_name, now_utc=now_utc),
+        }
     df = df.copy()
     df["timestamp_local"] = df["timestamp_utc"].dt.tz_convert(ZoneInfo(tz_name))
     rows = df.tail(limit_rows).copy()
@@ -348,6 +417,11 @@ def build_history_payload(
         "sessions": sessions,
         "rows": [_jsonable_record(row) for row in rows.to_dict(orient="records")],
         "note": STRATEGY_NAV_NOTE,
+        "freshness": build_live_freshness_payload(
+            _jsonable_record(rows.iloc[-1].to_dict()) if not rows.empty else None,
+            tz_name=tz_name,
+            now_utc=now_utc,
+        ),
     }
 
 
@@ -358,15 +432,29 @@ def build_dashboard_payload(
     reports_dir: Path = REPORTS_DIR,
     service_name: str = UI_TARGET_SERVICE,
     status_runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
+    now_utc: pd.Timestamp | None = None,
 ) -> dict[str, Any]:
+    now_ts = _coerce_utc_timestamp(now_utc) or pd.Timestamp.now(tz="UTC")
+    report_date = now_ts.tz_convert(ZoneInfo(tz_name)).strftime("%Y-%m-%d")
     status = get_bot_service_status(service_name=service_name, status_runner=status_runner)
-    today = build_report_payload(mode="date", tz_name=tz_name, results_dir=results_dir, reports_dir=reports_dir)
+    today = build_report_payload(
+        mode="date",
+        tz_name=tz_name,
+        report_date=report_date,
+        results_dir=results_dir,
+        reports_dir=reports_dir,
+    )
     full_history = build_report_payload(mode="full_history", tz_name=tz_name, results_dir=results_dir, reports_dir=reports_dir)
     latest_row = today["recent_rows"][-1] if today["recent_rows"] else (full_history["recent_rows"][-1] if full_history["recent_rows"] else None)
+    freshness = build_live_freshness_payload(latest_row, tz_name=tz_name, now_utc=now_ts)
+    if today["summary"].get("rows", 0) > 0:
+        freshness["today_has_rows"] = True
+    status["ui_state"] = "stale" if status["active_state"] == "active" and freshness["is_stale"] else status["active_state"]
     return {
         "status": status,
         "today": today,
         "full_history": full_history,
         "latest_row": latest_row,
+        "freshness": freshness,
         "note": STRATEGY_NAV_NOTE,
     }

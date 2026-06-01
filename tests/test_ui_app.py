@@ -193,6 +193,7 @@ class UIAppTest(unittest.TestCase):
             self.assertIn("Strategy NAV excludes non-strategy assets such as OKB.", response.text)
             self.assertIn("Live bot status", response.text)
             self.assertIn("Today Unrealized PnL", response.text)
+            self.assertIn("No new cycle has been recorded", response.text)
 
     def test_logout_invalidates_session(self):
         client, tmp = self._build_client()
@@ -251,6 +252,14 @@ class UIAppTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("Unrealized PnL USD", response.text)
             self.assertIn("Unrealized PnL %", response.text)
+
+    def test_history_page_shows_stale_cycle_warning(self):
+        client, tmp = self._build_client()
+        with tmp:
+            self._login(client)
+            response = client.get("/history")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Latest recorded cycle is stale", response.text)
 
     def test_control_endpoint_rejects_when_disabled(self):
         client, tmp = self._build_client(controls_enabled=False)
