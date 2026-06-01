@@ -63,10 +63,19 @@ flowchart LR
   mode uses only local Ollama and returns unavailable/no signal if Ollama fails.
 - `agents/meta_fusion_agent.py`: applies optional overlay tilts and portfolio
   risk constraints; missing overlays do not tilt the RL allocation.
+- `tradingbot.runtime.artifacts`: shared daily session directories, metadata,
+  CSV row appends, live decision loading, and session summaries.
+- `tradingbot.reports.live_daily`: compact live report generation shared by the
+  CLI and private UI.
+- `tradingbot.apps`: lazy application entrypoints that let commands move behind
+  package boundaries without breaking operator-facing scripts.
 - `backtest.py`: runs single pipelines, ablation matrices, realism profiles, and
   RL diagnostics.
 - `scripts/run_live.py`: canonical OKX-first execution loop. Root `run_live.py`
   is the compatibility entrypoint.
+
+See also [Runtime spine](architecture/runtime_spine.md) and
+[ADR 0001](adr/0001-application-spine-and-artifact-runtime.md).
 
 ## Data Splits And Training Hygiene
 

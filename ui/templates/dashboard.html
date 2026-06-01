@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | Trading Bot UI{% endblock %}
+{% block content %}
+<section class="hero-card">
+  <div>
+    <div class="eyebrow">Private operator console</div>
+    <h2>Live bot status</h2>
+    <p class="muted">{{ note }}</p>
+  </div>
+  <div class="status-pill {{ 'stale' if status.ui_state == 'stale' else ('running' if status.active_state == 'active' else 'stopped') }}">
+    {{ status.active_state }} / {{ status.sub_state }}
+  </div>
+</section>
+
+{% if freshness.is_stale %}
+<section class="alert">
+  No new cycle has been recorded since {{ freshness.latest_timestamp_local or 'n/a' }}. Latest cycle age: {{ freshness.age_text }}.
+</section>
+{% elif not freshness.today_has_rows %}
+<section class="notice">
+  No cycle has been recorded for today yet. Latest row: {{ freshness.latest_timestamp_local or 'n/a' }}.
+</section>
+{% endif %}
+
+<section class="card-grid">
+  <article class="panel metric">
+    <div class="label">Latest NAV</div>
+    <div class="value">${{ '%.2f'|format((latest_row.nav if latest_row else 0) or 0) }}</div>
+    <div class="muted">Latest cycle at {{ latest_row.timestamp_local if latest_row else 'n/a' }}</div>
+  </article>
+  <article class="panel metric">
+    <div class="label">Latest Cycle Age</div>
+    <div class="value">{{ freshness.age_text }}</div>
+    <div class="muted">{{ freshness.latest_timestamp_local if freshness.latest_timestamp_local else 'No recorded cycles yet' }}</div>
+  </article>
+  <article class="panel metric">
+    <div class="label">Today Unrealized PnL</div>
+    <div class="value">${{ '%.2f'|format((today.summary.unrealized_pnl_usd if today.summary.get('unrealized_pnl_usd') is not none else (today.summary.pnl_usd if today.summary.get('pnl_usd') is not none else 0)) or 0) }}</div>
+    <div class="muted">{{ '%.2f'|format((today.summary.unrealized_pnl_pct if today.summary.get('unrealized_pnl_pct') is not none else (today.summary.pnl_pct if today.summary.get('pnl_pct') is not none else 0)) or 0) }}%</div>
+  </article>
+  <article class="panel metric">
+    <div class="label">Full-history Unrealized PnL</div>
+    <div class="value">${{ '%.2f'|format((full_history.summary.unrealized_pnl_usd if full_history.summary.get('unrealized_pnl_usd') is not none else (full_history.summary.pnl_usd if full_history.summary.get('pnl_usd') is not none else 0)) or 0) }}</div>
+    <div class="muted">{{ '%.2f'|format((full_history.summary.unrealized_pnl_pct if full_history.summary.get('unrealized_pnl_pct') is not none else (full_history.summary.pnl_pct if full_history.summary.get('pnl_pct') is not none else 0)) or 0) }}%</div>
+  </article>
+  <article class="panel metric">
+    <div class="label">Service</div>
+    <div class="value">{{ status.service_name }}</div>
+    <div class="muted">PID {{ status.main_pid }}{% if status.started_at %} · {{ status.started_at }}{% endif %}</div>
+  </article>
+</section>
+
+<section class="card-grid">
+  <article class="panel">
+    <div class="panel-title">Current weights</div>
+    {% if latest_row %}
+    <div class="weight-row"><span>BTC</span><strong>{{ '%.2f'|format((latest_row.btc_weight or 0) * 100) }}%</strong></div>
+    <div class="weight-row"><span>ETH</span><strong>{{ '%.2f'|format((latest_row.eth_weight or 0) * 100) }}%</strong></div>
+    <div class="weight-row"><span>Cash</span><strong>{{ '%.2f'|format((latest_row.cash_weight or 0) * 100) }}%</strong></div>
+    {% else %}
+    <p class="muted">No live rows yet.</p>
+    {% endif %}
+  </article>
+  <article class="panel">
+    <div class="panel-title">Controls</div>
+    {% if controls_enabled and is_admin %}
+    <p class="muted">Admin controls are enabled for this session.</p>
+    <div class="button-stack">
+      <form method="post" action="/api/control/status" class="inline-form" data-control-form="true">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="ghost-button" type="submit">Refresh service</button>
+      </form>
+      <div class="button-row">
+        <form method="post" action="/api/control/start" class="inline-form" data-control-form="true">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="primary-button" type="submit">Start</button>
+        </form>
+        <form method="post" action="/api/control/stop" class="inline-form" data-confirm="Stop the trading bot service?" data-control-form="true">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="ghost-button danger-button" type="submit">Stop</button>
+        </form>
+        <form method="post" action="/api/control/restart" class="inline-form" data-confirm="Restart the trading bot service?" data-control-form="true">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="ghost-button" type="submit">Restart</button>
+        </form>
+      </div>
+    </div>
+    {% elif controls_enabled %}
+    <p class="muted">Controls are enabled, but this session is viewer-only.</p>
+    <div class="button-row">
+      <button class="ghost-button" type="button" disabled>Admin only</button>
+    </div>
+    {% else %}
+    <p class="muted">Read-only phase. Controls are disabled.</p>
+    <div class="button-row">
+      <button class="ghost-button" type="button" disabled>Start</button>
+      <button class="ghost-button" type="button" disabled>Stop</button>
+      <button class="ghost-button" type="button" disabled>Restart</button>
+    </div>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

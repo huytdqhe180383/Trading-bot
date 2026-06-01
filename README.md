@@ -17,6 +17,9 @@ adapters/kronos_adapter.py      -> Kronos forecast adapter (fallback-safe)
 adapters/tradingagents_adapter.py -> TradingAgents adapter (fallback-safe)
 adapters/llm_risk_gate_adapter.py -> low-cadence local LLM risk gate (Ollama)
 agents/meta_fusion_agent.py     -> RL + overlays fusion (Kronos / TradingAgents / LLM risk gate)
+tradingbot/runtime/artifacts.py -> shared report/result session artifact helpers
+tradingbot/reports/live_daily.py -> compact live report builder used by CLI and UI
+tradingbot/apps/                -> stable lazy application entrypoints
 backtest.py                     -> ablations + realism profiles + reports
 environment/trading_env.py      -> `SpotPortfolioEnv` generic spot portfolio env
 scripts/run_live.py             -> canonical live/testnet execution runner
@@ -157,6 +160,56 @@ python scripts/live_daily_report.py --last-hours 24
 python scripts/live_daily_report.py --full-history
 ```
 
+## private UI
+
+The repository now includes a private, phone-friendly web UI/PWA for bot
+operations.
+
+Current security posture:
+
+- private use only
+- Tailscale-first shared access
+- Tailscale-only deployment recommended
+- no public ingress
+- admin-only controls, viewer-safe sharing
+
+Main entrypoints:
+
+- `python scripts/run_ui.py`
+- `scripts/server/trading-bot-ui.service.example`
+
+Required UI env:
+
+- `UI_USERNAME`
+- `UI_PASSWORD`
+- `UI_SESSION_SECRET`
+- `UI_BIND_HOST`
+- `UI_PORT`
+- `UI_ENABLE_CONTROLS`
+- `UI_TRUST_TAILSCALE_HEADERS`
+- `UI_ALLOWED_TAILSCALE_USERS`
+- `UI_ADMIN_TAILSCALE_USERS`
+
+Recommended shared-access model:
+
+- keep the app bound to `127.0.0.1`
+- publish it with `tailscale serve`
+- allow friends through `UI_ALLOWED_TAILSCALE_USERS`
+- keep bot-control rights limited to `UI_ADMIN_TAILSCALE_USERS`
+
+Important scope note:
+
+- this UI manages one server-side bot instance
+- that bot is connected to one OKX account on the server
+- if each friend needs their own separate OKX credentials and their own bot,
+  that is a later multi-tenant architecture change, not this deploy
+
+Related docs:
+
+- `docs/digitalocean_private_ui_deployment_guide.md`
+- `docs/shared_private_ui_tailscale_guide.md`
+- `report/important/secure_private_ui_security_baseline.md`
+
 TradingAgents local research mode:
 
 - `TRADINGAGENTS_PROVIDER_FALLBACKS` in `config.py` controls order.
@@ -204,10 +257,14 @@ Keep secrets, raw market data, model artifacts, and logs out of commits.
 
 ## documentation
 
+- `CONTEXT.md`
+- `docs/README.md`
+- `docs/architecture/runtime_spine.md`
+- `docs/adr/0001-application-spine-and-artifact-runtime.md`
 - `docs/project_comprehensive_report_and_integration_plan.md`
 - `docs/codebase_audit.md`
 - `docs/architecture.md`
 - `docs/digitalocean_live_deployment_guide.md`
-- `docs/digitalocean_paper_trading_command_cheatsheet.md`
+- `docs/digitalocean_private_ui_deployment_guide.md`
 - `docs/rocm_runtime_architecture.md`
 - `docs/trading_env_documentation.md`

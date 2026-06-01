@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Logs | Trading Bot UI{% endblock %}
+{% block content %}
+<section class="hero-card">
+  <div>
+    <div class="eyebrow">Read-only diagnostics</div>
+    <h2>Live logs</h2>
+    <p class="muted">Recent app and service log tails. Refresh the page for the latest output.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <form method="get" action="/logs" class="controls-grid">
+    <label>
+      <span>Source</span>
+      <select name="source">
+        <option value="stderr" {% if selected_source == 'stderr' %}selected{% endif %}>stderr</option>
+        <option value="stdout" {% if selected_source == 'stdout' %}selected{% endif %}>stdout</option>
+        <option value="service" {% if selected_source == 'service' %}selected{% endif %}>service</option>
+      </select>
+    </label>
+    <label>
+      <span>Lines</span>
+      <input type="number" name="lines" min="10" max="2000" value="{{ lines }}">
+    </label>
+    <button type="submit" class="primary-button">Load logs</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-title">{{ log_payload.source }}</div>
+  {% if log_payload.available %}
+  <pre class="log-block">{{ log_payload.content }}</pre>
+  {% else %}
+  <div class="alert">Log source unavailable: {{ log_payload.error }}</div>
+  {% endif %}
+</section>
+{% endblock %}

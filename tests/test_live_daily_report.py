@@ -50,8 +50,8 @@ class LiveDailyReportTest(unittest.TestCase):
         summary = summarize_frame(df, "Asia/Bangkok")
         self.assertEqual(summary["rows"], 2)
         self.assertEqual(summary["orders_filled"], 1)
-        self.assertAlmostEqual(summary["pnl_usd"], 100.0, places=6)
-        self.assertAlmostEqual(summary["pnl_pct"], 1.0, places=6)
+        self.assertAlmostEqual(summary["unrealized_pnl_usd"], 100.0, places=6)
+        self.assertAlmostEqual(summary["unrealized_pnl_pct"], 1.0, places=6)
 
     def test_export_report_writes_json_and_markdown(self):
         df = pd.DataFrame(
