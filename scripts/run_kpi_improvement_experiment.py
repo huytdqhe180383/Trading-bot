@@ -57,6 +57,8 @@ VARIANT_A = Variant(
         "STEP_TURNOVER_CAP_NORMAL": "0.20",
         "STEP_TURNOVER_CAP_STRESS": "0.12",
         "STEP_TURNOVER_CAP_CRISIS": "0.08",
+        "REWARD_DRAWDOWN_WEIGHT": "18.0",
+        "REWARD_TAIL_LOSS_WEIGHT": "4.0",
     },
 )
 
@@ -70,8 +72,21 @@ VARIANT_B = Variant(
         "RISK_GOVERNOR_CRISIS_CASH_FLOOR": "0.50",
         "RISK_GOVERNOR_STRESS_MAX_RISK_ON": "0.70",
         "RISK_GOVERNOR_CRISIS_MAX_RISK_ON": "0.50",
+        "REWARD_DRAWDOWN_WEIGHT": "24.0",
+        "REWARD_TAIL_LOSS_WEIGHT": "5.0",
     },
 )
+
+
+PROMOTION_GATES = {
+    "trade_win_rate_pct": 60.0,
+    "trade_profit_factor": 1.25,
+    "sharpe_ratio": 1.5,
+    "sortino_ratio": 1.8,
+    "calmar_ratio": 2.0,
+    "max_drawdown_pct": -15.0,
+    "june_plunge_max_drawdown_pct": -6.0,
+}
 
 
 def _today() -> str:
@@ -312,9 +327,44 @@ def evaluate_methods(
             dry_run=dry_run,
         )
         if dry_run:
+            _run(
+                [
+                    sys.executable,
+                    "backtest.py",
+                    "--pipeline",
+                    "rl_only",
+                    "--realism-profile",
+                    "live_like",
+                    "--method",
+                    method,
+                    "--backtest-window",
+                    "june_plunge",
+                ],
+                env=env,
+                dry_run=True,
+            )
             continue
         session_dir = _latest_session_dir(before)
         metrics = pd.read_csv(session_dir / "backtest_metrics.csv", index_col=0)["value"].to_dict()
+        june_before = _session_dirs()
+        _run(
+            [
+                sys.executable,
+                "backtest.py",
+                "--pipeline",
+                "rl_only",
+                "--realism-profile",
+                "live_like",
+                "--method",
+                method,
+                "--backtest-window",
+                "june_plunge",
+            ],
+            env=env,
+            dry_run=False,
+        )
+        june_session_dir = _latest_session_dir(june_before)
+        june_metrics = pd.read_csv(june_session_dir / "backtest_metrics.csv", index_col=0)["value"].to_dict()
         rows.append(
             {
                 "phase": phase,
@@ -322,6 +372,9 @@ def evaluate_methods(
                 "seed": seed,
                 "method": method,
                 "session_dir": str(session_dir.relative_to(ROOT)),
+                "june_plunge_session_dir": str(june_session_dir.relative_to(ROOT)),
+                "june_plunge_max_drawdown_pct": june_metrics.get("max_drawdown_pct"),
+                "june_plunge_total_return_pct": june_metrics.get("total_return_pct"),
                 **metrics,
             }
         )
@@ -331,13 +384,37 @@ def evaluate_methods(
     return rows
 
 
-def rank_score(row: dict[str, object]) -> tuple[float, float, float, float]:
+def risk_first_rank_score(row: dict[str, object]) -> tuple[float, float, float, float, float, float, float]:
+    drawdown = float(row.get("max_drawdown_pct") or -999.0)
     return (
-        float(row.get("sharpe_ratio") or -999.0),
+        float(row.get("trade_win_rate_pct") or -999.0),
+        float(row.get("trade_profit_factor") or -999.0),
         float(row.get("sortino_ratio") or -999.0),
         float(row.get("calmar_ratio") or -999.0),
-        float(row.get("max_drawdown_pct") or -999.0),
+        float(row.get("sharpe_ratio") or -999.0),
+        drawdown,
+        float(row.get("total_return_pct") or -999.0),
     )
+
+
+def passes_promotion_gates(row: dict[str, object]) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    for metric, threshold in PROMOTION_GATES.items():
+        value = row.get(metric)
+        if value is None or value == "":
+            reasons.append(f"{metric} missing; requires {threshold}")
+            continue
+        actual = float(value)
+        if metric.endswith("drawdown_pct"):
+            if actual < float(threshold):
+                reasons.append(f"{metric} {actual:.4f} below allowed {threshold:.4f}")
+        elif actual < float(threshold):
+            reasons.append(f"{metric} {actual:.4f} below required {threshold:.4f}")
+    return len(reasons) == 0, reasons
+
+
+def rank_score(row: dict[str, object]) -> tuple[float, float, float, float, float, float, float]:
+    return risk_first_rank_score(row)
 
 
 def _merge_rows(existing: list[dict[str, object]], new_rows: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -375,12 +452,16 @@ def write_report(output_dir: Path, rows: list[dict[str, object]], args: argparse
     best_line = "No completed metric rows yet."
     if not by_phase.empty:
         best = max(combined_rows, key=rank_score)
+        passed, reasons = passes_promotion_gates(best)
+        gate_line = "Promotion gates: PASS." if passed else f"Promotion gates: FAIL ({'; '.join(reasons)})."
         best_line = (
             f"Best completed row: phase `{best['phase']}`, variant `{best['variant']}`, "
             f"seed `{best['seed']}`, method `{best['method']}`, "
+            f"trade win rate `{float(best.get('trade_win_rate_pct') or 0.0):.2f}%`, "
+            f"profit factor `{float(best.get('trade_profit_factor') or 0.0):.4f}`, "
             f"Sharpe `{float(best['sharpe_ratio']):.4f}`, "
             f"return `{float(best['total_return_pct']):.2f}%`, "
-            f"max DD `{float(best['max_drawdown_pct']):.2f}%`."
+            f"max DD `{float(best['max_drawdown_pct']):.2f}%`. {gate_line}"
         )
     lines = [
         "# KPI Improvement Experiment",
@@ -400,8 +481,8 @@ def write_report(output_dir: Path, rows: list[dict[str, object]], args: argparse
         "",
         "- Each seed restores the immutable 107% checkpoint before training.",
         "- Phase 1 uses flat slippage and disabled eval kill switch to isolate resume-only effects.",
-        "- Phase 2 enables volatility-scaled slippage, eval kill switch, and step turnover caps.",
-        "- Promotion still requires manual review against the clean Phase 0 baseline gates.",
+        "- Phase 2 enables volatility-scaled slippage, eval kill switch, step turnover caps, and heavier drawdown/tail-loss rewards.",
+        "- Promotion fails closed unless the risk-first gates pass, including trade win rate, profit factor, drawdown, and June plunge replay.",
     ]
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return report_path

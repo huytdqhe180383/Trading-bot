@@ -74,6 +74,7 @@ from environment.trading_env import SpotPortfolioEnv, _softmax_weights
 import environment.trading_env as trading_env_module
 from metrics.performance import (
     compute_metrics,
+    compute_trade_metrics,
     plot_ensemble_method_comparison,
     plot_equity_curve,
     plot_kpi_radar,
@@ -108,6 +109,10 @@ REALISM = {
 ENSEMBLE_METHODS = ["mean", "voting", "weighted", "dynamic_weighted", "regime_weighted", "imca"]
 DEFAULT_COMPARISON_METHODS = ["mean", "weighted", "dynamic_weighted", "regime_weighted"]
 POST_POLICY_OVERLAYS = ["none", "champion_guard"]
+BACKTEST_WINDOWS = {
+    "full": (None, None),
+    "june_plunge": ("2026-06-03", "2026-06-04"),
+}
 POSITION_CAP_MODES = ["fixed", "smooth_nav"]
 TRADE_PROFILES = {
     "none": {},
@@ -177,6 +182,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model-dir", type=Path, default=LIVE_BASELINE_MODEL_DIR, help="Model directory to load PPO/SAC checkpoints from.")
     parser.add_argument("--trade-profile", default="none", choices=list(TRADE_PROFILES.keys()))
+    parser.add_argument("--backtest-window", default="full", choices=list(BACKTEST_WINDOWS.keys()))
     parser.add_argument("--position-cap-mode", default=POSITION_CAP_MODE, choices=POSITION_CAP_MODES)
     parser.add_argument(
         "--post-policy-overlay",
@@ -339,6 +345,12 @@ def write_trade_decision_log(episode_df: pd.DataFrame, output_path: Path) -> Non
         "position_reset_reason",
         "bars_since_last_material_trade",
         "material_trade_executed",
+        "recommendation",
+        "risk_exit_applied",
+        "risk_exit_tier",
+        "risk_exit_reason",
+        "human_approval_required",
+        "reentry_locked",
         "abs_drawdown",
         "rolling_drawdown",
         "risk_governor_active",
@@ -588,17 +600,30 @@ def maybe_save_best_model_snapshot(
     return snapshot_dir
 
 
-def load_test_data() -> dict[str, pd.DataFrame]:
-    return {sym: pd.read_parquet(PROCESSED_DATA_DIR / f"{sym}_test.parquet") for sym in SYMBOLS}
+def _filter_window(data: dict[str, pd.DataFrame], window_name: str) -> dict[str, pd.DataFrame]:
+    start, end = BACKTEST_WINDOWS[window_name]
+    if start is None and end is None:
+        return data
+    return {sym: frame.loc[start:end].copy() for sym, frame in data.items()}
 
 
-def load_kronos_raw_data() -> dict[str, pd.DataFrame]:
-    return load_raw_ohlcv_data(
-        SYMBOLS,
-        raw_data_dir=RAW_DATA_DIR,
-        start=BACKTEST_START,
-        end=BACKTEST_END,
-        timeframe=BASE_TIMEFRAME,
+def load_test_data(window_name: str = "full") -> dict[str, pd.DataFrame]:
+    return _filter_window(
+        {sym: pd.read_parquet(PROCESSED_DATA_DIR / f"{sym}_test.parquet") for sym in SYMBOLS},
+        window_name,
+    )
+
+
+def load_kronos_raw_data(window_name: str = "full") -> dict[str, pd.DataFrame]:
+    return _filter_window(
+        load_raw_ohlcv_data(
+            SYMBOLS,
+            raw_data_dir=RAW_DATA_DIR,
+            start=BACKTEST_START,
+            end=BACKTEST_END,
+            timeframe=BASE_TIMEFRAME,
+        ),
+        window_name,
     )
 
 
@@ -966,6 +991,12 @@ def run_backtest(
             "position_reset_reason": info.get("position_reset_reason", ""),
             "bars_since_last_material_trade": int(info.get("bars_since_last_material_trade", 0)),
             "material_trade_executed": bool(info.get("material_trade_executed", False)),
+            "recommendation": info.get("recommendation", ""),
+            "risk_exit_applied": bool(info.get("risk_exit_applied", False)),
+            "risk_exit_tier": info.get("risk_exit_tier", ""),
+            "risk_exit_reason": info.get("risk_exit_reason", ""),
+            "human_approval_required": bool(info.get("human_approval_required", False)),
+            "reentry_locked": bool(info.get("reentry_locked", False)),
             "abs_drawdown": info.get("abs_drawdown", 0.0),
             "rolling_drawdown": info.get("rolling_drawdown", 0.0),
             "tail_loss_component": info.get("tail_loss_component", 0.0),
@@ -1130,6 +1161,7 @@ def run_matrix(
             benchmark_nav=benchmark,
             trades_count=trades_count,
         )
+        metrics.update(compute_trade_metrics(episode_df))
         _print_metrics(f"{pipeline}/{realism_profile}", metrics)
         row = dict(meta)
         row.update(metrics)
@@ -1265,6 +1297,7 @@ def run_ensemble_method_comparison(
             benchmark_nav=benchmark,
             trades_count=trades_count,
         )
+        metrics.update(compute_trade_metrics(episode_df))
         row = {"method": method, **meta}
         row.update(metrics)
         row.update(_episode_diagnostics(episode_df))
@@ -1287,8 +1320,8 @@ def main() -> None:
     apply_trade_profile_overrides(args)
     apply_execution_control_overrides(args)
 
-    test_data = load_test_data()
-    raw_ohlcv_data = load_kronos_raw_data()
+    test_data = load_test_data(args.backtest_window)
+    raw_ohlcv_data = load_kronos_raw_data(args.backtest_window)
     benchmark = build_benchmark_nav(test_data, initial_capital=args.initial_capital)
     session_dir = create_backtest_session_dir(RESULTS_DIR)
     write_session_metadata(
@@ -1304,6 +1337,7 @@ def main() -> None:
             "compare_ensemble_methods": args.compare_ensemble_methods,
             "model_dir": args.model_dir,
             "trade_profile": args.trade_profile,
+            "backtest_window": args.backtest_window,
             "position_cap_mode": args.position_cap_mode,
             "post_policy_overlay": args.post_policy_overlay,
             "initial_capital": args.initial_capital,
@@ -1408,6 +1442,7 @@ def main() -> None:
                 benchmark_nav=benchmark,
                 trades_count=trades_count,
             )
+            metrics.update(compute_trade_metrics(episode_df))
             row = dict(meta)
             row.update(metrics)
             rows.append(row)
@@ -1460,6 +1495,7 @@ def main() -> None:
         benchmark_nav=benchmark,
         trades_count=trades_count,
     )
+    metrics.update(compute_trade_metrics(episode_df))
     _print_metrics(f"{args.pipeline}/{args.realism_profile}", metrics)
 
     episode_path = session_dir / f"backtest_episode_{args.pipeline}_{args.realism_profile}_{args.method}.parquet"

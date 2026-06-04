@@ -109,6 +109,8 @@ class UIServicesTest(unittest.TestCase):
             payload = build_history_payload(results_dir=results_dir, tz_name="Asia/Bangkok")
             self.assertEqual(len(payload["sessions"]), 2)
             self.assertEqual(payload["rows"][-1]["ui_action"], "trade")
+            self.assertEqual(payload["rows"][0]["ui_action"], "no_order")
+            self.assertEqual(payload["rows"][0]["position_state"], "risk_on")
             self.assertEqual(payload["note"], STRATEGY_NAV_NOTE)
 
     def test_build_dashboard_payload_includes_status_and_summary(self):

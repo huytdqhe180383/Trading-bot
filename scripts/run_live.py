@@ -80,6 +80,7 @@ from risk.risk_constraints import (
     apply_stress_risk_governor,
     compute_nav_scaled_max_asset_weight as _compute_nav_scaled_max_asset_weight,
 )
+from risk.semi_auto import SemiAutoRiskController
 from tradingbot.runtime.artifacts import (
     append_csv_row,
     create_numbered_daily_dir,
@@ -224,12 +225,14 @@ def infer_market_regime(feature_state: dict[str, pd.DataFrame], *, nav: float, p
 
 
 class LiveExecutionController:
-    def __init__(self) -> None:
+    def __init__(self, *, semi_auto_entries_enabled: bool = False) -> None:
         self.bars_since_last_material_trade = max(int(MIN_HOLD_BARS), 0)
         self.last_material_trade_direction = np.zeros(len(SYMBOLS), dtype=np.float32)
         self.asset_highest_prices = np.zeros(len(SYMBOLS), dtype=np.float32)
         self.below_threshold_bars = np.zeros(len(SYMBOLS), dtype=np.int32)
         self.peak_nav: float | None = None
+        self.semi_auto_entries_enabled = bool(semi_auto_entries_enabled)
+        self.semi_auto = SemiAutoRiskController()
 
     @staticmethod
     def _normalize_weights(weights: np.ndarray) -> np.ndarray:
@@ -280,6 +283,19 @@ class LiveExecutionController:
             enabled=RISK_GOVERNOR_ENABLED,
         )
         governor_forced = float(np.abs(governed[:-1] - requested[:-1]).sum()) > 1e-9
+        btc_return_24h = _btc_return_24h(feature_state)
+        semi_target, semi_diag = self.semi_auto.apply(
+            target_weights=governed,
+            current_weights=current_weights,
+            session_drawdown=float(regime["drawdown"]),
+            btc_return_24h=btc_return_24h,
+            human_approved=not self.semi_auto_entries_enabled,
+        )
+        if semi_diag["risk_exit_applied"]:
+            governed = semi_target
+            governor_forced = True
+        elif self.semi_auto_entries_enabled and semi_diag["human_approval_required"]:
+            governed = semi_target
 
         regime_label = str(regime["label"])
         if regime_label == "crisis":
@@ -392,8 +408,20 @@ class LiveExecutionController:
             "risk_governor_cash_floor": float(governor_diag.get("cash_floor", 0.0)),
             "risk_governor_max_risk_on": float(governor_diag.get("max_risk_on", 0.0)),
             "dynamic_max_asset_weight": float(dynamic_max_asset_weight),
+            "btc_return_24h": float(btc_return_24h) if btc_return_24h is not None else np.nan,
+            **semi_diag,
         }
         return adjusted.astype(np.float32), diag
+
+
+def _btc_return_24h(feature_state: dict[str, pd.DataFrame]) -> float | None:
+    frame = feature_state.get(SYMBOLS[0])
+    if frame is None or frame.empty or "close" not in frame:
+        return None
+    closes = frame["close"].dropna().astype(float)
+    if len(closes) < 25:
+        return None
+    return float(closes.iloc[-1] / closes.iloc[-25] - 1.0)
 
 
 def evaluate_safety_gates(
@@ -509,7 +537,7 @@ def main() -> None:
     gateway = CCXTExchangeGateway(exchange_id=args.exchange, mode=args.mode, symbols=SYMBOLS)
     ensemble = load_ensemble(args.model_dir)
     rl_agent = EnsembleAgent(ensemble, method=args.method)
-    execution_controller = LiveExecutionController()
+    execution_controller = LiveExecutionController(semi_auto_entries_enabled=True)
 
     kronos = KronosAdapter(
         enabled=args.enable_kronos,
@@ -653,6 +681,12 @@ def main() -> None:
                 "post_risk_weights": str(diagnostics.post_risk),
                 "execution_weights": str(exec_weights.tolist()),
                 "execution_diag": str(execution_diag),
+                "recommendation": execution_diag.get("recommendation", ""),
+                "risk_exit_applied": bool(execution_diag.get("risk_exit_applied", False)),
+                "risk_exit_tier": execution_diag.get("risk_exit_tier", ""),
+                "risk_exit_reason": execution_diag.get("risk_exit_reason", ""),
+                "human_approval_required": bool(execution_diag.get("human_approval_required", False)),
+                "reentry_locked": bool(execution_diag.get("reentry_locked", False)),
                 "kronos_signal_count": len(kronos_signals or {}),
                 "tradingagents_source": getattr(ta_signal, "source", ""),
                 "orders_submitted": 0,
@@ -716,6 +750,12 @@ def main() -> None:
             "post_risk_weights": str(diagnostics.post_risk),
             "execution_weights": str(exec_weights.tolist()),
             "execution_diag": str(execution_diag),
+            "recommendation": execution_diag.get("recommendation", ""),
+            "risk_exit_applied": bool(execution_diag.get("risk_exit_applied", False)),
+            "risk_exit_tier": execution_diag.get("risk_exit_tier", ""),
+            "risk_exit_reason": execution_diag.get("risk_exit_reason", ""),
+            "human_approval_required": bool(execution_diag.get("human_approval_required", False)),
+            "reentry_locked": bool(execution_diag.get("reentry_locked", False)),
             "kronos_signal_count": len(kronos_signals or {}),
             "tradingagents_source": getattr(ta_signal, "source", ""),
             "orders_submitted": int(len(orders)),

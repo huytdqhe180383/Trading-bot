@@ -47,6 +47,7 @@ from config import (
     NAV_SCALED_CAP_MAX_NAV, NAV_SCALED_CAP_MIN_WEIGHT,
 )
 from risk.risk_constraints import apply_position_cap_mode, apply_stress_risk_governor
+from risk.semi_auto import SemiAutoRiskController
 
 
 def _softmax_weights(action: np.ndarray) -> np.ndarray:
@@ -203,6 +204,7 @@ class SpotPortfolioEnv(gym.Env):
             "volatility_proxy": 0.0,
         }
         self._last_dynamic_max_asset_weight = float(MAX_ASSET_WEIGHT)
+        self._semi_auto = SemiAutoRiskController()
         self._bars_since_last_material_trade = max(int(MIN_HOLD_BARS), 0)
         self._last_material_trade_direction = np.zeros(self.n_assets, dtype=np.float32)
         self._position_reset_below_threshold_bars = np.zeros(self.n_assets, dtype=np.int32)
@@ -514,6 +516,15 @@ class SpotPortfolioEnv(gym.Env):
     def _current_abs_drawdown(self) -> float:
         return float((self._portfolio - self._max_portfolio) / (self._max_portfolio + 1e-9))
 
+    def _btc_return_24h(self) -> float | None:
+        if self._step_idx < 24:
+            return None
+        start = max(0, self._step_idx - 24)
+        returns = self._returns_array[start:self._step_idx, 0]
+        if len(returns) == 0:
+            return None
+        return float(np.prod(returns) - 1.0)
+
     def _apply_stress_governor(self, weights: np.ndarray) -> np.ndarray:
         regime = self.get_market_regime()
         governed, diag = apply_stress_risk_governor(
@@ -804,6 +815,15 @@ class SpotPortfolioEnv(gym.Env):
         requested_weights = self._apply_position_cap(requested_weights)
         governed_weights = self._apply_stress_governor(requested_weights)
         governor_forced = float(np.abs(governed_weights[:-1] - requested_weights[:-1]).sum()) > 1e-9
+        governed_weights, semi_auto_diag = self._semi_auto.apply(
+            target_weights=governed_weights,
+            current_weights=old_weights,
+            session_drawdown=self._current_abs_drawdown(),
+            btc_return_24h=self._btc_return_24h(),
+            human_approved=True,
+        )
+        if semi_auto_diag["risk_exit_applied"]:
+            governor_forced = True
         new_weights, execution_diag = self._apply_execution_controls(
             governed_weights,
             current_weights=old_weights,
@@ -894,6 +914,7 @@ class SpotPortfolioEnv(gym.Env):
             "min_notional_blocked_count": min_notional_diag["min_notional_blocked_count"],
             "min_notional_blocked_assets": min_notional_diag["min_notional_blocked_assets"],
             **reward_components,
+            **semi_auto_diag,
         }
         self._last_execution_diag = {
             **execution_diag,

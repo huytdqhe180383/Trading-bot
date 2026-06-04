@@ -34,6 +34,13 @@ class BacktestSessionOutputsTest(unittest.TestCase):
         self.assertEqual(args.trade_profile, "aggressive")
         self.assertEqual(args.position_cap_mode, "smooth_nav")
 
+    def test_build_arg_parser_accepts_june_plunge_replay_window(self):
+        parser = build_arg_parser()
+
+        args = parser.parse_args(["--backtest-window", "june_plunge"])
+
+        self.assertEqual(args.backtest_window, "june_plunge")
+
     def test_apply_trade_profile_overrides_sets_expected_thresholds(self):
         parser = build_arg_parser()
         args = parser.parse_args(["--trade-profile", "moderate"])

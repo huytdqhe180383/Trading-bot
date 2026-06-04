@@ -396,8 +396,11 @@ def build_history_payload(
     df["timestamp_local"] = df["timestamp_utc"].dt.tz_convert(ZoneInfo(tz_name))
     rows = df.tail(limit_rows).copy()
     rows["ui_action"] = rows.get("orders_submitted", pd.Series([0] * len(rows))).fillna(0).astype(int).apply(
-        lambda value: "trade" if value > 0 else "hold"
+        lambda value: "trade" if value > 0 else "no_order"
     )
+    btc_weight = rows.get("btc_weight", pd.Series([0.0] * len(rows))).fillna(0.0).astype(float)
+    eth_weight = rows.get("eth_weight", pd.Series([0.0] * len(rows))).fillna(0.0).astype(float)
+    rows["position_state"] = (btc_weight + eth_weight).apply(lambda value: "risk_on" if value > 0.01 else "cash")
     session_summary = (
         df.groupby("session_dir", dropna=True)
         .agg(

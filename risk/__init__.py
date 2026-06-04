@@ -10,6 +10,12 @@ from .risk_constraints import (
     normalize_weights,
 )
 from .post_policy_overlay import apply_post_policy_overlay
+from .semi_auto import (
+    SemiAutoRiskController,
+    cap_risk_on,
+    classify_recommendation,
+    evaluate_hard_risk_exit,
+)
 
 __all__ = [
     "normalize_weights",
@@ -20,4 +26,8 @@ __all__ = [
     "limit_turnover",
     "apply_global_constraints",
     "apply_post_policy_overlay",
+    "SemiAutoRiskController",
+    "cap_risk_on",
+    "classify_recommendation",
+    "evaluate_hard_risk_exit",
 ]

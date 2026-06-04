@@ -159,6 +159,82 @@ def _time_in_market(nav: pd.Series, threshold: float = 0.0) -> float:
     return float(exposed / len(r) * 100.0) if len(r) > 0 else 0.0
 
 
+def compute_trade_metrics(decisions: pd.DataFrame, *, risk_threshold: float = 0.01) -> dict[str, float]:
+    """Compute realized trade-level metrics from backtest/live decision rows."""
+    if decisions.empty or "portfolio_value" not in decisions:
+        return {
+            "trade_count": 0.0,
+            "trade_win_rate_pct": 0.0,
+            "trade_profit_factor": 0.0,
+            "trade_expectancy_pct": 0.0,
+            "avg_trade_win_pct": 0.0,
+            "avg_trade_loss_pct": 0.0,
+            "max_adverse_excursion_pct": 0.0,
+            "max_favorable_excursion_pct": 0.0,
+            "time_to_exit_after_risk_trigger_steps": 0.0,
+        }
+
+    df = decisions.reset_index(drop=True).copy()
+    risk_cols = [col for col in ("btc_weight", "eth_weight") if col in df.columns]
+    if not risk_cols:
+        return compute_trade_metrics(pd.DataFrame())
+    risk_on = df[risk_cols].fillna(0.0).astype(float).sum(axis=1) > float(risk_threshold)
+    nav = df["portfolio_value"].astype(float).reset_index(drop=True)
+    trades: list[dict[str, float]] = []
+    entry_idx: int | None = None
+    entry_nav = 0.0
+    min_nav = 0.0
+    max_nav = 0.0
+    risk_exit_steps: list[int] = []
+    pending_risk_exit_idx: int | None = None
+    risk_exit_series = df.get("risk_exit_applied", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+
+    for idx, active in enumerate(risk_on.tolist()):
+        current_nav = float(nav.iloc[idx])
+        if active and entry_idx is None:
+            entry_idx = idx
+            entry_nav = current_nav
+            min_nav = current_nav
+            max_nav = current_nav
+        if entry_idx is not None:
+            min_nav = min(min_nav, current_nav)
+            max_nav = max(max_nav, current_nav)
+            if bool(risk_exit_series.iloc[idx]) and pending_risk_exit_idx is None:
+                pending_risk_exit_idx = idx
+        is_last = idx + 1 >= len(risk_on)
+        if entry_idx is not None and ((not active and idx > entry_idx) or (active and is_last)):
+            exit_idx = idx
+            pnl_pct = (current_nav / max(entry_nav, 1e-9) - 1.0) * 100.0
+            trades.append(
+                {
+                    "pnl_pct": pnl_pct,
+                    "mae_pct": (min_nav / max(entry_nav, 1e-9) - 1.0) * 100.0,
+                    "mfe_pct": (max_nav / max(entry_nav, 1e-9) - 1.0) * 100.0,
+                }
+            )
+            if pending_risk_exit_idx is not None:
+                risk_exit_steps.append(max(0, exit_idx - pending_risk_exit_idx))
+            entry_idx = None
+            pending_risk_exit_idx = None
+
+    pnl = np.asarray([trade["pnl_pct"] for trade in trades], dtype=np.float64)
+    wins = pnl[pnl > 0.0]
+    losses = pnl[pnl < 0.0]
+    gross_profit = float(wins.sum())
+    gross_loss = abs(float(losses.sum()))
+    return {
+        "trade_count": float(len(trades)),
+        "trade_win_rate_pct": float((len(wins) / len(trades)) * 100.0) if trades else 0.0,
+        "trade_profit_factor": float(gross_profit / gross_loss) if gross_loss > 0 else (float("inf") if gross_profit > 0 else 0.0),
+        "trade_expectancy_pct": float(pnl.mean()) if len(pnl) else 0.0,
+        "avg_trade_win_pct": float(wins.mean()) if len(wins) else 0.0,
+        "avg_trade_loss_pct": float(losses.mean()) if len(losses) else 0.0,
+        "max_adverse_excursion_pct": float(min((trade["mae_pct"] for trade in trades), default=0.0)),
+        "max_favorable_excursion_pct": float(max((trade["mfe_pct"] for trade in trades), default=0.0)),
+        "time_to_exit_after_risk_trigger_steps": float(np.mean(risk_exit_steps)) if risk_exit_steps else 0.0,
+    }
+
+
 def _information_ratio(nav: pd.Series, benchmark_nav: pd.Series | None = None) -> float:
     """
     Information Ratio vs a simple Buy-and-Hold benchmark.
