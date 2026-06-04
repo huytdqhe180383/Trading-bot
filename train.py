@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import importlib.util
 import os
 import subprocess
 import sys
@@ -78,6 +79,13 @@ def _resolve_device(requested: str) -> str:
     return requested
 
 
+def _resolve_tensorboard_log_dir() -> str | None:
+    if importlib.util.find_spec("tensorboard") is None:
+        logger.warning("TensorBoard is not installed; training will run without TensorBoard logging.")
+        return None
+    return str(LOGS_DIR / "tensorboard")
+
+
 def _candidate_resume_paths(algo: str) -> list[Path]:
     algo_dir = MODELS_DIR / algo
     lower = algo.lower()
@@ -121,7 +129,7 @@ def _load_resumed_model(
     checkpoint: str | Path,
     env,
     device: str,
-    tensorboard_log: str,
+    tensorboard_log: str | None,
     seed: int,
 ):
     model = cls.load(
@@ -218,6 +226,7 @@ def train_algo(
     # ── Model ────────────────────────────────────────────────────────────
     cls    = ALGO_CLS[algo]
     kwargs = ALGO_KWARGS[algo].copy()
+    tensorboard_log = _resolve_tensorboard_log_dir()
 
     # On-policy algorithms (PPO) need the env at init time;
     # off-policy (SAC) take it too but also accept replay buffers.
@@ -230,7 +239,7 @@ def train_algo(
                 checkpoint=checkpoint,
                 env=train_env,
                 device=device,
-                tensorboard_log=str(LOGS_DIR / "tensorboard"),
+                tensorboard_log=tensorboard_log,
                 seed=seed,
             )
         else:
@@ -240,7 +249,7 @@ def train_algo(
                 train_env,
                 device=device,
                 seed=seed,
-                tensorboard_log=str(LOGS_DIR / "tensorboard"),
+                tensorboard_log=tensorboard_log,
                 **kwargs,
             )
     else:
@@ -249,7 +258,7 @@ def train_algo(
             train_env,
             device=device,
             seed=seed,
-            tensorboard_log=str(LOGS_DIR / "tensorboard"),
+            tensorboard_log=tensorboard_log,
             **kwargs,
         )
 

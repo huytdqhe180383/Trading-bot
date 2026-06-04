@@ -203,22 +203,20 @@ def _resolve_output_dir(output_id: int | None) -> Path:
 
 
 def _latest_session_dir(before: set[Path]) -> Path:
-    day_dir = RESULTS_DAILY / _today()
-    candidates = [
-        p
-        for p in day_dir.iterdir()
-        if p.is_dir() and p.name.isdigit() and p not in before
-    ]
+    candidates = [p for p in _session_dirs() if p not in before]
     if not candidates:
         raise RuntimeError("Backtest did not create a new daily session directory.")
-    return max(candidates, key=lambda p: int(p.name))
+    return max(candidates, key=lambda p: (p.parent.name, int(p.name)))
 
 
 def _session_dirs() -> set[Path]:
-    day_dir = RESULTS_DAILY / _today()
-    if not day_dir.exists():
+    if not RESULTS_DAILY.exists():
         return set()
-    return {p for p in day_dir.iterdir() if p.is_dir() and p.name.isdigit()}
+    sessions: set[Path] = set()
+    for day_dir in RESULTS_DAILY.iterdir():
+        if day_dir.is_dir():
+            sessions.update(p for p in day_dir.iterdir() if p.is_dir() and p.name.isdigit())
+    return sessions
 
 
 def restore_baseline_models(algos: tuple[str, ...] = ("PPO", "SAC")) -> None:
@@ -258,43 +256,48 @@ def train_pair(
     algos: tuple[str, ...],
     env: dict[str, str] | None,
     dry_run: bool,
+    resume: bool = True,
 ) -> None:
     if "PPO" in algos:
+        command = [
+            sys.executable,
+            "train.py",
+            "--algo",
+            "PPO",
+            "--timesteps",
+            str(ppo_steps),
+            "--seed",
+            str(seed),
+            "--validation-fraction",
+            "0.2",
+            "--skip-backtest",
+        ]
+        if resume:
+            command.insert(4, "--resume")
         _run(
-            [
-                sys.executable,
-                "train.py",
-                "--algo",
-                "PPO",
-                "--resume",
-                "--timesteps",
-                str(ppo_steps),
-                "--seed",
-                str(seed),
-                "--validation-fraction",
-                "0.2",
-                "--skip-backtest",
-            ],
+            command,
             env=env,
             dry_run=dry_run,
         )
     if "SAC" in algos:
+        command = [
+            sys.executable,
+            "train.py",
+            "--algo",
+            "SAC",
+            "--timesteps",
+            str(sac_steps),
+            "--seed",
+            str(seed),
+            "--validation-fraction",
+            "0.2",
+            "--disable-eval-callback",
+            "--skip-backtest",
+        ]
+        if resume:
+            command.insert(4, "--resume")
         _run(
-            [
-                sys.executable,
-                "train.py",
-                "--algo",
-                "SAC",
-                "--resume",
-                "--timesteps",
-                str(sac_steps),
-                "--seed",
-                str(seed),
-                "--validation-fraction",
-                "0.2",
-                "--disable-eval-callback",
-                "--skip-backtest",
-            ],
+            command,
             env=env,
             dry_run=dry_run,
         )
@@ -320,6 +323,8 @@ def evaluate_methods(
                 "rl_only",
                 "--realism-profile",
                 "live_like",
+                "--model-dir",
+                str(ROOT / "models"),
                 "--method",
                 method,
             ],
@@ -335,6 +340,8 @@ def evaluate_methods(
                     "rl_only",
                     "--realism-profile",
                     "live_like",
+                    "--model-dir",
+                    str(ROOT / "models"),
                     "--method",
                     method,
                     "--backtest-window",
@@ -355,6 +362,8 @@ def evaluate_methods(
                 "rl_only",
                 "--realism-profile",
                 "live_like",
+                "--model-dir",
+                str(ROOT / "models"),
                 "--method",
                 method,
                 "--backtest-window",
@@ -469,7 +478,12 @@ def write_report(output_dir: Path, rows: list[dict[str, object]], args: argparse
         f"- Created: {_today()}",
         f"- Results directory: `{output_dir.relative_to(ROOT)}`",
         f"- Phase requested: `{args.phase}`",
-        f"- Baseline checkpoint source: `{BASELINE_BACKUP.relative_to(ROOT)}`",
+        f"- Training mode: `{args.training_mode}`",
+        (
+            f"- Baseline checkpoint source: `{BASELINE_BACKUP.relative_to(ROOT)}`"
+            if args.training_mode == "resume"
+            else f"- Baseline checkpoint source: `{BASELINE_BACKUP.relative_to(ROOT)}` (unused in fresh mode)"
+        ),
         f"- Methods: `{', '.join(METHODS)}`",
         f"- Seeds: `{', '.join(map(str, SEEDS))}`",
         "",
@@ -479,7 +493,11 @@ def write_report(output_dir: Path, rows: list[dict[str, object]], args: argparse
         "",
         "## Notes",
         "",
-        "- Each seed restores the immutable 107% checkpoint before training.",
+        (
+            "- Each seed restores the immutable 107% checkpoint before training."
+            if args.training_mode == "resume"
+            else "- Fresh mode trains new PPO/SAC policies from scratch and evaluates checkpoints from `models/`."
+        ),
         "- Phase 1 uses flat slippage and disabled eval kill switch to isolate resume-only effects.",
         "- Phase 2 enables volatility-scaled slippage, eval kill switch, step turnover caps, and heavier drawdown/tail-loss rewards.",
         "- Promotion fails closed unless the risk-first gates pass, including trade win rate, profit factor, drawdown, and June plunge replay.",
@@ -495,6 +513,7 @@ def run_phase1(
     start_seed: int | None,
     only_seed: int | None,
     algos: tuple[str, ...],
+    resume: bool,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     phase_dir = output_dir / "phase1_resume_expansion"
@@ -504,7 +523,7 @@ def run_phase1(
             continue
         if start_seed is not None and seed < start_seed:
             continue
-        if not dry_run:
+        if resume and not dry_run:
             restore_baseline_models(algos)
         train_pair(
             seed=seed,
@@ -513,6 +532,7 @@ def run_phase1(
             algos=algos,
             env=None,
             dry_run=dry_run,
+            resume=resume,
         )
         seed_dir = phase_dir / f"seed_{seed}"
         seed_dir.mkdir(parents=True, exist_ok=True)
@@ -523,7 +543,7 @@ def run_phase1(
                 output_dir=phase_dir,
                 phase="phase1_resume_expansion",
                 seed=seed,
-                variant="flat_resume_only",
+                variant="flat_resume_only" if resume else "flat_fresh_full_retrain",
                 env=None,
                 dry_run=dry_run,
             )
@@ -531,12 +551,12 @@ def run_phase1(
     return rows
 
 
-def run_phase2_quick(output_dir: Path, *, dry_run: bool) -> tuple[str | None, list[dict[str, object]]]:
+def run_phase2_quick(output_dir: Path, *, dry_run: bool, resume: bool) -> tuple[str | None, list[dict[str, object]]]:
     rows: list[dict[str, object]] = []
     phase_dir = output_dir / "phase2_quick_screen"
     phase_dir.mkdir(parents=True, exist_ok=True)
     for variant in [VARIANT_A, VARIANT_B]:
-        if not dry_run:
+        if resume and not dry_run:
             restore_baseline_models()
         train_pair(
             seed=42,
@@ -545,6 +565,7 @@ def run_phase2_quick(output_dir: Path, *, dry_run: bool) -> tuple[str | None, li
             algos=("PPO", "SAC"),
             env=variant.env,
             dry_run=dry_run,
+            resume=resume,
         )
         variant_dir = phase_dir / variant.name
         variant_dir.mkdir(parents=True, exist_ok=True)
@@ -568,13 +589,13 @@ def run_phase2_quick(output_dir: Path, *, dry_run: bool) -> tuple[str | None, li
     return str(winner), rows
 
 
-def run_phase2_full(output_dir: Path, winner: str, *, dry_run: bool) -> list[dict[str, object]]:
+def run_phase2_full(output_dir: Path, winner: str, *, dry_run: bool, resume: bool) -> list[dict[str, object]]:
     variant = VARIANT_A if winner == VARIANT_A.name else VARIANT_B
     rows: list[dict[str, object]] = []
     phase_dir = output_dir / "phase2_full_validation"
     phase_dir.mkdir(parents=True, exist_ok=True)
     for seed in SEEDS:
-        if not dry_run:
+        if resume and not dry_run:
             restore_baseline_models()
         train_pair(
             seed=seed,
@@ -583,6 +604,7 @@ def run_phase2_full(output_dir: Path, winner: str, *, dry_run: bool) -> list[dic
             algos=("PPO", "SAC"),
             env=variant.env,
             dry_run=dry_run,
+            resume=resume,
         )
         seed_dir = phase_dir / variant.name / f"seed_{seed}"
         seed_dir.mkdir(parents=True, exist_ok=True)
@@ -667,6 +689,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--phase2-quick-sac-steps", type=int, default=PHASE2_QUICK_SAC_STEPS)
     parser.add_argument("--phase2-full-ppo-steps", type=int, default=PHASE2_FULL_PPO_STEPS)
     parser.add_argument("--phase2-full-sac-steps", type=int, default=PHASE2_FULL_SAC_STEPS)
+    parser.add_argument(
+        "--training-mode",
+        choices=["resume", "fresh"],
+        default="resume",
+        help="Use 'fresh' to train new PPO/SAC policies from scratch instead of resuming the baseline.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -700,6 +728,7 @@ def main() -> None:
     invalid_algos = sorted(set(phase1_algos).difference({"PPO", "SAC"}))
     if invalid_algos:
         raise ValueError(f"Unsupported algorithms: {invalid_algos}")
+    resume_training = args.training_mode == "resume"
 
     if args.phase in {"phase1", "all"}:
         rows.extend(
@@ -709,17 +738,18 @@ def main() -> None:
                 start_seed=args.start_seed,
                 only_seed=args.only_seed,
                 algos=phase1_algos,
+                resume=resume_training,
             )
         )
 
     if args.phase in {"phase2-quick", "all"}:
-        winner, quick_rows = run_phase2_quick(output_dir, dry_run=args.dry_run)
+        winner, quick_rows = run_phase2_quick(output_dir, dry_run=args.dry_run, resume=resume_training)
         rows.extend(quick_rows)
 
     if args.phase in {"phase2-full", "all"}:
         if not winner:
             raise ValueError("--phase2-winner is required for phase2-full without a quick-screen winner.")
-        rows.extend(run_phase2_full(output_dir, winner, dry_run=args.dry_run))
+        rows.extend(run_phase2_full(output_dir, winner, dry_run=args.dry_run, resume=resume_training))
 
     if args.dry_run:
         print(f"[dry-run] output directory would be: {output_dir}")

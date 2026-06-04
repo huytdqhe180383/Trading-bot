@@ -1,10 +1,12 @@
 import unittest
 from unittest.mock import Mock
+from unittest.mock import patch
 
 import pandas as pd
 
 from train import (
     _load_resumed_model,
+    _resolve_tensorboard_log_dir,
     build_parser,
     build_post_training_backtest_command,
     split_train_validation,
@@ -76,6 +78,10 @@ class TrainHygieneTest(unittest.TestCase):
         self.assertIs(loaded, model)
         cls.load.assert_called_once()
         model.set_random_seed.assert_called_once_with(2026)
+
+    def test_tensorboard_log_dir_is_disabled_when_package_missing(self):
+        with patch("train.importlib.util.find_spec", return_value=None):
+            self.assertIsNone(_resolve_tensorboard_log_dir())
 
 
 if __name__ == "__main__":
