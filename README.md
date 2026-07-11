@@ -160,6 +160,48 @@ python scripts/live_daily_report.py --last-hours 24
 python scripts/live_daily_report.py --full-history
 ```
 
+## analyst-only Discord and frontend API
+
+The analyst runtime is advisory only. It uses public market data and an
+OpenAI-compatible `/v1/chat/completions` provider, writes canonical analyst
+events, and exposes UI/Discord responses. It does not build orders, mutate RL
+weights, or feed LLM output into live execution.
+
+Important failure rule: provider errors, invalid JSON/schema, and budget
+exhaustion are recorded as errors. The analyst runtime does not invent fallback
+BUY/SELL/HOLD/ALLOW decisions.
+
+Entrypoints:
+
+```powershell
+python scripts/run_analyst.py --max-cycles 1
+python scripts/run_analyst_discord.py
+```
+
+Main env:
+
+- `LLM_BASE_URL`
+- `LLM_API_KEY`
+- `LLM_MODEL`
+- `LLM_TIMEOUT_SECS`
+- `LLM_DAILY_CALL_BUDGET`
+- `LLM_INTERACTIVE_CALL_BUDGET`
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_APPLICATION_ID`
+- `DISCORD_GUILD_ID`
+- `DISCORD_ALERT_CHANNEL_ID`
+- `DISCORD_ANALYST_CHANNEL_ID`
+- `DISCORD_ALLOWED_USER_IDS`
+
+Private UI analyst API:
+
+- `GET /api/analyst/status`
+- `POST /api/analyst/run`
+- `GET /api/analyst/events`
+- `GET /api/analyst/signals`
+- `GET /api/analyst/budget`
+- `WS /ws/analyst`
+
 ## private UI
 
 The repository now includes a private, phone-friendly web UI/PWA for bot

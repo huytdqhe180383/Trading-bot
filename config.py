@@ -247,6 +247,29 @@ UI_ALLOWED_TAILSCALE_USERS = _env_csv("UI_ALLOWED_TAILSCALE_USERS", ())
 UI_ADMIN_TAILSCALE_USERS = _env_csv("UI_ADMIN_TAILSCALE_USERS", ())
 
 # ============================================================
+# ANALYST-ONLY LLM / DISCORD SETTINGS
+# ============================================================
+ANALYST_ENABLED = _env_bool("ANALYST_ENABLED", False)
+ANALYST_SCAN_INTERVAL_SECS = _env_int("ANALYST_SCAN_INTERVAL_SECS", 900)
+ANALYST_RL_CADENCE = _env_str("ANALYST_RL_CADENCE", "1h")
+ANALYST_INTRADAY_RISK_TIMEFRAME = _env_str("ANALYST_INTRADAY_RISK_TIMEFRAME", "15m")
+ANALYST_EVENT_LIMIT = _env_int("ANALYST_EVENT_LIMIT", 200)
+
+LLM_BASE_URL = _env_str("LLM_BASE_URL", "")
+LLM_API_KEY = _env_str("LLM_API_KEY", "")
+LLM_MODEL = _env_str("LLM_MODEL", "")
+LLM_TIMEOUT_SECS = _env_float("LLM_TIMEOUT_SECS", 20.0)
+LLM_DAILY_CALL_BUDGET = _env_int("LLM_DAILY_CALL_BUDGET", 8)
+LLM_INTERACTIVE_CALL_BUDGET = _env_int("LLM_INTERACTIVE_CALL_BUDGET", 12)
+
+DISCORD_BOT_TOKEN = _env_str("DISCORD_BOT_TOKEN", "")
+DISCORD_APPLICATION_ID = _env_str("DISCORD_APPLICATION_ID", "")
+DISCORD_GUILD_ID = _env_str("DISCORD_GUILD_ID", "")
+DISCORD_ALERT_CHANNEL_ID = _env_str("DISCORD_ALERT_CHANNEL_ID", "")
+DISCORD_ANALYST_CHANNEL_ID = _env_str("DISCORD_ANALYST_CHANNEL_ID", "")
+DISCORD_ALLOWED_USER_IDS = _env_csv("DISCORD_ALLOWED_USER_IDS", ())
+
+# ============================================================
 # SIGNAL INTEGRATION (Kronos + TradingAgents + Meta-Fusion)
 # ============================================================
 ENABLE_KRONOS = False

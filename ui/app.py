@@ -10,10 +10,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from config import (
@@ -50,6 +51,7 @@ from ui.services import (
     run_control_command,
     safe_compact_report_path,
 )
+from tradingbot.analyst import AnalystService, create_default_analyst_service
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
@@ -83,6 +85,14 @@ class UIAppContext:
     journal_runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None
     control_runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None
     rate_limiter: InMemoryRateLimiter = field(default_factory=InMemoryRateLimiter)
+    analyst_service: AnalystService | None = None
+
+
+class AnalystRunRequest(BaseModel):
+    symbol: str = "ALL"
+    question: str | None = None
+    validate_alert_id: str | None = None
+    market_snapshot: dict[str, Any] | None = None
 
 
 def _client_identity(request: Request) -> str:
@@ -214,6 +224,8 @@ def _render_template(
 def create_app(ctx: UIAppContext | None = None) -> FastAPI:
     app = FastAPI(title="Trading Bot Private UI")
     context = ctx or UIAppContext()
+    if context.analyst_service is None:
+        context.analyst_service = create_default_analyst_service()
     app.state.ctx = context
     app.add_middleware(
         SessionMiddleware,
@@ -417,6 +429,62 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return JSONResponse(payload)
+
+    @app.get("/api/analyst/status")
+    async def api_analyst_status(request: Request) -> JSONResponse:
+        _require_api_auth(request, context)
+        return JSONResponse(context.analyst_service.status().to_dict())
+
+    @app.post("/api/analyst/run")
+    async def api_analyst_run(request: Request, payload: AnalystRunRequest) -> JSONResponse:
+        _require_api_auth(request, context)
+        if payload.validate_alert_id:
+            event = context.analyst_service.validate(
+                alert_id=payload.validate_alert_id,
+                symbol=payload.symbol,
+                scope="interactive",
+            )
+        elif payload.question:
+            event = context.analyst_service.ask(
+                question=payload.question,
+                symbol=payload.symbol,
+                scope="interactive",
+            )
+        else:
+            event = context.analyst_service.run_update(
+                symbol=payload.symbol,
+                market_snapshot=payload.market_snapshot,
+                scope="interactive",
+            )
+        return JSONResponse(event.to_public_dict())
+
+    @app.get("/api/analyst/events")
+    async def api_analyst_events(request: Request, limit: int | None = None) -> JSONResponse:
+        _require_api_auth(request, context)
+        return JSONResponse({"events": context.analyst_service.events(limit=limit)})
+
+    @app.get("/api/analyst/signals")
+    async def api_analyst_signals(request: Request, limit: int | None = None) -> JSONResponse:
+        _require_api_auth(request, context)
+        return JSONResponse({"signals": context.analyst_service.signals(limit=limit)})
+
+    @app.get("/api/analyst/budget")
+    async def api_analyst_budget(request: Request) -> JSONResponse:
+        _require_api_auth(request, context)
+        return JSONResponse(context.analyst_service.budget.snapshot())
+
+    @app.websocket("/ws/analyst")
+    async def ws_analyst(websocket: WebSocket) -> None:
+        if not websocket.session.get("authenticated"):
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
+        try:
+            await websocket.send_json({"type": "analyst_events", "events": context.analyst_service.events()})
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            return
 
     @app.post("/api/control/{action}")
     async def api_control(action: str, request: Request) -> JSONResponse:

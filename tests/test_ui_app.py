@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 from fastapi.testclient import TestClient
 
+from tradingbot.analyst.models import AnalystEvent, AnalystStatus
 from ui.app import UIAppContext, create_app
 
 
@@ -336,6 +337,84 @@ class UIAppTest(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200)
             self.assertIn("ok", response.text)
+
+    def test_analyst_api_requires_authentication(self):
+        client, tmp = self._build_client()
+        with tmp:
+            response = client.get("/api/analyst/status")
+            self.assertEqual(response.status_code, 401)
+
+    def test_analyst_api_exposes_public_event_shape(self):
+        client, tmp = self._build_client()
+        with tmp:
+            self._login(client)
+            fake = _FakeAnalystService()
+            client.app.state.ctx.analyst_service = fake
+
+            response = client.post("/api/analyst/run", json={"symbol": "BTCUSDT"})
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["status"], "ok")
+            self.assertEqual(data["recommendation"], "HOLD")
+            self.assertNotIn("private_balances", str(data))
+            self.assertNotIn("exchange_credentials", str(data))
+
+    def test_analyst_budget_endpoint_uses_service_budget(self):
+        client, tmp = self._build_client()
+        with tmp:
+            self._login(client)
+            fake = _FakeAnalystService()
+            client.app.state.ctx.analyst_service = fake
+
+            response = client.get("/api/analyst/budget")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["interactive_limit"], 12)
+
+
+class _FakeBudget:
+    def snapshot(self):
+        return {
+            "day": "2026-07-11",
+            "background_used": 0,
+            "background_limit": 8,
+            "interactive_used": 0,
+            "interactive_limit": 12,
+        }
+
+
+class _FakeAnalystService:
+    def __init__(self):
+        self.budget = _FakeBudget()
+        self.event = AnalystEvent(
+            event_type="analysis",
+            status="ok",
+            title="BTC analyst update",
+            message="No decisive edge.",
+            symbol="BTCUSDT",
+            role="main_analyst",
+            recommendation="HOLD",
+            payload={"private_balances": {"USDT": 1}, "public": True},
+        )
+
+    def status(self):
+        return AnalystStatus(enabled=True, events_count=1, budgets=self.budget.snapshot(), latest_event=self.event.to_public_dict())
+
+    def run_update(self, **kwargs):
+        return self.event
+
+    def ask(self, **kwargs):
+        return self.event
+
+    def validate(self, **kwargs):
+        return self.event
+
+    def events(self, limit=None):
+        return [self.event.to_public_dict()]
+
+    def signals(self, limit=None):
+        return [self.event.to_public_dict()]
 
 
 if __name__ == "__main__":

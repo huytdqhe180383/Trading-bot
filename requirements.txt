@@ -35,6 +35,7 @@ tqdm>=4.66.0
 loguru>=0.7.2               # Structured logging
 itsdangerous>=2.2.0
 python-multipart>=0.0.20
+discord.py>=2.6.0            # Analyst-only Discord bot interface
 
 # FinRL-X (clone from GitHub, then install locally)
 # git clone https://github.com/AI4Finance-Foundation/FinRL-Trading.git
