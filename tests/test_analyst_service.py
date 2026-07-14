@@ -101,6 +101,37 @@ class AnalystServiceTest(unittest.TestCase):
         self.assertNotIn("LiveExecutionController", source)
         self.assertNotIn("build_rebalance_orders", source)
 
+    def test_explain_uses_llm_instead_of_copying_original(self):
+        with TemporaryDirectory() as tmp_name:
+            tmp = type("Tmp", (), {"name": tmp_name})
+            llm = _FakeLLM()
+            service = self._service(tmp, llm=llm)
+            original = service.run_update(symbol="BTCUSDT")
+            llm.result = {
+                "recommendation": "HOLD",
+                "confidence": 0.6,
+                "rationale": "Plain-language explanation distinct from the original alert.",
+                "risk_notes": "Watch whether the move fades.",
+                "invalidation": "A clean breakout changes the read.",
+            }
+
+            explained = service.explain(alert_id=original.id)
+
+            self.assertEqual(explained.status, "ok")
+            self.assertEqual(explained.event_type, "explain")
+            self.assertNotEqual(explained.message, original.message)
+
+    def test_validate_infers_symbol_from_related_alert(self):
+        with TemporaryDirectory() as tmp_name:
+            tmp = type("Tmp", (), {"name": tmp_name})
+            llm = _FakeLLM()
+            service = self._service(tmp, llm=llm)
+            original = service.run_update(symbol="ETHUSDT")
+
+            validated = service.validate(alert_id=original.id)
+
+            self.assertEqual(validated.symbol, "ETHUSDT")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,7 @@ from config import (
 from .budget import LLMBudget, LLMBudgetExhausted
 from .llm import LLMInvalidResponseError, LLMProviderError, OpenAICompatibleLLMClient
 from .models import AnalystEvent, AnalystStatus, AnalystValidationError, validate_analyst_payload
+from .news import fetch_okx_announcements, format_news_message
 from .store import AnalystEventStore
 
 
@@ -125,6 +126,8 @@ class AnalystService:
     ) -> AnalystEvent:
         normalized_symbol = _normalize_symbol(symbol)
         related = next((event for event in self.events() if event.get("id") == alert_id), None)
+        if related and normalized_symbol == "ALL":
+            normalized_symbol = _normalize_symbol(str(related.get("symbol", "ALL")))
         prompt_payload = {
             "symbol": normalized_symbol,
             "alert_id": alert_id,
@@ -155,20 +158,52 @@ class AnalystService:
                 payload={"alert_id": alert_id},
             )
             return self.store.append(event)
-        event = AnalystEvent(
+        prompt_payload = {
+            "symbol": _normalize_symbol(str(related.get("symbol", "ALL"))),
+            "alert_id": alert_id,
+            "related_alert": related,
+            "task": (
+                "Explain this existing alert in fresh, plainer language for a human analyst. "
+                "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
+                "Do not copy the original rationale verbatim. Do not include quantities, leverage, orders, "
+                "exchange commands, or target allocations."
+            ),
+        }
+        return self._call_role(
+            role="main_analyst",
             event_type="explain",
-            status="ok",
             title=f"Explanation for {alert_id}",
-            message=str(related.get("message", "")),
-            symbol=str(related.get("symbol", "ALL")),
-            role="system",
-            recommendation=related.get("recommendation"),
-            confidence=related.get("confidence"),
-            rationale=str(related.get("rationale", "")),
-            risk_notes=str(related.get("risk_notes", "")),
-            invalidation=str(related.get("invalidation", "")),
-            payload={"alert_id": alert_id},
+            prompt_payload=prompt_payload,
+            scope="interactive",
         )
+
+    def latest_news(self, *, symbol: str = "ALL", alert_id: str = "") -> AnalystEvent:
+        normalized_symbol = _normalize_symbol(symbol)
+        related = next((event for event in self.events() if event.get("id") == alert_id), None)
+        if related and normalized_symbol == "ALL":
+            normalized_symbol = _normalize_symbol(str(related.get("symbol", "ALL")))
+        try:
+            items = fetch_okx_announcements(symbol=normalized_symbol, limit=5)
+            event = AnalystEvent(
+                event_type="news",
+                status="ok",
+                title=f"{normalized_symbol} OKX announcements",
+                message=format_news_message(items, symbol=normalized_symbol),
+                symbol=normalized_symbol,
+                role="system",
+                payload={"alert_id": alert_id, "source": "okx_announcements", "items": items},
+            )
+        except Exception as exc:
+            event = AnalystEvent(
+                event_type="news",
+                status="error",
+                title=f"{normalized_symbol} OKX announcements unavailable",
+                message=f"OKX announcements unavailable: {exc}",
+                symbol=normalized_symbol,
+                role="system",
+                error_code=type(exc).__name__,
+                payload={"alert_id": alert_id, "source": "okx_announcements"},
+            )
         return self.store.append(event)
 
     def _call_role(
@@ -240,7 +275,11 @@ class AnalystService:
             rationale=parsed["rationale"],
             risk_notes=parsed["risk_notes"],
             invalidation=parsed["invalidation"],
-            payload={"scope": scope},
+            payload={
+                "scope": scope,
+                "alert_id": prompt_payload.get("alert_id", ""),
+                "market_snapshot": prompt_payload.get("market_snapshot", {}),
+            },
         )
         return self.store.append(event)
 

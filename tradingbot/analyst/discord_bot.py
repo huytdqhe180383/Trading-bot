@@ -185,14 +185,15 @@ def run_discord_bot() -> None:
         _check(interaction)
         await _reply(interaction, "Conversation memory reset. Persisted audit events remain on disk.")
 
-    @tree.command(name="news", description="News command placeholder for deterministic news snapshots.")
+    @tree.command(name="news", description="Show latest OKX announcements.")
     async def news_cmd(interaction: discord.Interaction, symbol: str = "ALL") -> None:
         _check(interaction)
-        await _reply(interaction, f"News snapshot for {symbol.upper()} is not wired yet; no LLM call was spent.")
+        event = service.latest_news(symbol=symbol)
+        await _reply(interaction, bridge.format_event(event))
 
     @client.event
     async def on_interaction(interaction: discord.Interaction) -> None:
-        if interaction.type is not discord.InteractionType.component:
+        if interaction.type != discord.InteractionType.component:
             return
         custom_id = str(getattr(interaction.data, "get", lambda key, default=None: default)("custom_id", ""))
         if not custom_id.startswith("analyst:"):
@@ -211,7 +212,8 @@ def run_discord_bot() -> None:
             await interaction.followup.send(bridge.format_event(event)[:1900], ephemeral=True)
             return
         if action == "news":
-            await _reply(interaction, "Latest news snapshot is not wired yet; no LLM call was spent.")
+            event = service.latest_news(alert_id=alert_id)
+            await _reply(interaction, bridge.format_event(event))
             return
         await _reply(interaction, "Unsupported analyst action.")
 
