@@ -47,6 +47,7 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertEqual(event.status, "ok")
             self.assertEqual(event.recommendation, "HOLD")
             self.assertNotIn("orders", event.to_public_dict())
+            self.assertIn("news_snapshot", event.payload)
             events = service.events()
             self.assertEqual(len(events), 1)
 

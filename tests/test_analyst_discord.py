@@ -2,7 +2,7 @@ import unittest
 
 from tradingbot.analyst.discord_bot import DiscordAnalystBot, DiscordAnalystConfig, DiscordNotifier
 from tradingbot.analyst.models import AnalystEvent
-from tradingbot.analyst.news import _parse_okx_announcement_html, format_news_message
+from tradingbot.analyst.news import _parse_rss, format_news_message
 
 
 class DiscordAnalystTest(unittest.TestCase):
@@ -71,16 +71,22 @@ class DiscordAnalystTest(unittest.TestCase):
             ["analyst:explain:abc123", "analyst:validate:abc123", "analyst:news:abc123"],
         )
 
-    def test_okx_announcement_parser_formats_news(self):
-        items = _parse_okx_announcement_html(
-            '<a href="/help/okx-to-support-btc-network-update">OKX to support BTC network update</a>'
-            '<a href="/help/okx-to-list-eth-contract">OKX to list ETH contract</a>'
+    def test_rss_parser_formats_news(self):
+        items = _parse_rss(
+            """
+            <rss><channel><item>
+              <title>Bitcoin traders watch ETF inflows</title>
+              <link>https://example.test/btc</link>
+              <pubDate>Tue, 14 Jul 2026 10:00:00 GMT</pubDate>
+            </item></channel></rss>
+            """,
+            source="example",
         )
 
         message = format_news_message([item.to_dict() for item in items], symbol="BTCUSDT")
 
-        self.assertIn("Latest OKX announcements", message)
-        self.assertIn("OKX to support BTC network update", message)
+        self.assertIn("Latest public crypto news", message)
+        self.assertIn("Bitcoin traders watch ETF inflows", message)
 
 
 if __name__ == "__main__":

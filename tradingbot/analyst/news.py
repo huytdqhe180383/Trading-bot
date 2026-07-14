@@ -1,114 +1,150 @@
-"""OKX-sourced public announcement snapshots for analyst news."""
+"""Public crypto-news snapshots for analyst prompts and Discord."""
 
 from __future__ import annotations
 
-import html
-import re
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+from email.utils import parsedate_to_datetime
 from typing import Any
+from xml.etree import ElementTree
 
 import requests
 
-OKX_ANNOUNCEMENTS_URL = "https://www.okx.com/help/section/announcements-latest-announcements"
+NEWS_FEEDS = (
+    ("coindesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+    ("cointelegraph", "https://cointelegraph.com/rss"),
+    ("decrypt", "https://decrypt.co/feed"),
+)
 
 
 @dataclass
 class NewsItem:
     title: str
     url: str
-    source: str = "okx_announcements"
+    source: str
+    published_at: str = ""
 
     def to_dict(self) -> dict[str, str]:
         return asdict(self)
 
 
-def fetch_okx_announcements(*, symbol: str = "ALL", limit: int = 5, timeout_secs: float = 10.0) -> list[dict[str, str]]:
-    """Fetch recent OKX Help Center announcements.
+def fetch_crypto_news(*, symbol: str = "ALL", limit: int = 8, timeout_secs: float = 10.0) -> list[dict[str, str]]:
+    """Fetch a small multi-source public crypto-news snapshot.
 
-    OKX exposes trading/market APIs, but not a documented general crypto-news
-    API. For OKX-sourced news, use their public announcements page.
+    This deliberately avoids paid or key-bearing news APIs. The snapshot is
+    bounded so it can be safely included in the analyst LLM prompt.
     """
-    response = requests.get(
-        OKX_ANNOUNCEMENTS_URL,
-        headers={"User-Agent": "tradingbot-analyst/1.0"},
-        timeout=timeout_secs,
-    )
-    response.raise_for_status()
-    items = _parse_okx_announcement_html(response.text)
-    filtered = _filter_items(items, symbol=symbol)
+    items: list[NewsItem] = []
+    for source, url in NEWS_FEEDS:
+        try:
+            response = requests.get(
+                url,
+                headers={"User-Agent": "tradingbot-analyst/1.0"},
+                timeout=timeout_secs,
+            )
+            response.raise_for_status()
+            items.extend(_parse_rss(response.text, source=source))
+        except Exception:
+            continue
+
+    filtered = _filter_items(_dedupe(items), symbol=symbol)
+    filtered.sort(key=lambda item: item.published_at, reverse=True)
     return [item.to_dict() for item in filtered[: max(1, int(limit))]]
 
 
-def _parse_okx_announcement_html(raw_html: str) -> list[NewsItem]:
-    article_pattern = re.compile(
-        r'<li class="index_articleItem__[^>]*>\s*'
-        r'<a href="(?P<href>/help/[^"]+)".*?'
-        r'<div class="[^"]*index_articleTitle__[^"]*">(?P<title>.*?)</div>.*?'
-        r'Published on (?P<date>[^<]+)</span>',
-        re.IGNORECASE | re.DOTALL,
-    )
+def build_news_snapshot(*, symbol: str = "ALL", limit: int = 8) -> dict[str, Any]:
+    try:
+        items = fetch_crypto_news(symbol=symbol, limit=limit)
+        return {
+            "status": "ok",
+            "source": "public_crypto_rss",
+            "items": items,
+            "note": "Public RSS headlines from CoinDesk, Cointelegraph, and Decrypt.",
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "source": "public_crypto_rss",
+            "items": [],
+            "error": str(exc),
+        }
+
+
+def _parse_rss(raw_xml: str, *, source: str) -> list[NewsItem]:
+    root = ElementTree.fromstring(raw_xml.encode("utf-8"))
+    out: list[NewsItem] = []
+    for item in root.findall(".//item"):
+        title = _node_text(item, "title")
+        link = _node_text(item, "link")
+        published_raw = _node_text(item, "pubDate")
+        if not title or not link:
+            continue
+        out.append(
+            NewsItem(
+                title=_clean(title),
+                url=_clean(link),
+                source=source,
+                published_at=_normalize_pubdate(published_raw),
+            )
+        )
+    return out
+
+
+def _node_text(item: ElementTree.Element, tag: str) -> str:
+    node = item.find(tag)
+    if node is None or node.text is None:
+        return ""
+    return node.text
+
+
+def _clean(value: str) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _normalize_pubdate(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        return parsedate_to_datetime(value).isoformat()
+    except Exception:
+        return value
+
+
+def _dedupe(items: list[NewsItem]) -> list[NewsItem]:
     seen: set[str] = set()
-    items: list[NewsItem] = []
-    for match in article_pattern.finditer(raw_html):
-        href = html.unescape(match.group("href")).strip()
-        title = _clean_title(match.group("title"))
-        if _skip_title(title) or href in seen:
+    out: list[NewsItem] = []
+    for item in items:
+        key = item.url or item.title.lower()
+        if key in seen:
             continue
-        seen.add(href)
-        items.append(NewsItem(title=f"{title} ({match.group('date').strip()})", url=f"https://www.okx.com{href}"))
-    if items:
-        return items
-
-    pattern = re.compile(r'href="(?P<href>/help/[^"]+)"[^>]*>(?P<title>[^<]{8,160})</a>', re.IGNORECASE)
-    for match in pattern.finditer(raw_html):
-        href = html.unescape(match.group("href")).strip()
-        title = _clean_title(match.group("title"))
-        if _skip_title(title) or href in seen:
-            continue
-        seen.add(href)
-        items.append(NewsItem(title=title, url=f"https://www.okx.com{href}"))
-    if items:
-        return items
-
-    # Next.js pages can hide content in JSON blobs; this fallback catches the
-    # same help article paths with nearby title strings without depending on a
-    # private OKX API.
-    blob_pattern = re.compile(r'"title"\s*:\s*"(?P<title>[^"]{8,160})".{0,500}?"url"\s*:\s*"(?P<href>/help/[^"]+)"')
-    for match in blob_pattern.finditer(raw_html):
-        href = html.unescape(match.group("href")).strip()
-        title = html.unescape(match.group("title")).strip()
-        if href and href not in seen:
-            seen.add(href)
-            items.append(NewsItem(title=title, url=f"https://www.okx.com{href}"))
-    return items
-
-
-def _clean_title(value: str) -> str:
-    title = re.sub(r"<[^>]+>", "", value)
-    title = html.unescape(title).strip()
-    return re.sub(r"\s+", " ", title)
-
-
-def _skip_title(title: str) -> bool:
-    if not title:
-        return True
-    generic = {"announcements", "latest announcements", "api announcements"}
-    return title.strip().lower() in generic
+        seen.add(key)
+        out.append(item)
+    return out
 
 
 def _filter_items(items: list[NewsItem], *, symbol: str) -> list[NewsItem]:
     normalized = str(symbol or "ALL").upper()
     if normalized in {"ALL", ""}:
         return items
-    tokens = {normalized, normalized.replace("USDT", ""), normalized.replace("-USDT", "")}
-    filtered = [item for item in items if any(token and token in item.title.upper() for token in tokens)]
+    asset = normalized.replace("USDT", "").replace("-USDT", "")
+    aliases = {
+        "BTC": {"BTC", "BITCOIN"},
+        "ETH": {"ETH", "ETHER", "ETHEREUM"},
+    }.get(asset, {asset})
+    filtered = [item for item in items if any(alias in item.title.upper() for alias in aliases)]
     return filtered or items
 
 
-def format_news_message(items: list[dict[str, Any]], *, symbol: str) -> str:
+def format_news_message(snapshot_or_items: dict[str, Any] | list[dict[str, Any]], *, symbol: str) -> str:
+    if isinstance(snapshot_or_items, dict):
+        items = list(snapshot_or_items.get("items", []))
+    else:
+        items = list(snapshot_or_items)
     if not items:
-        return f"No recent OKX announcements found for {symbol.upper()}."
-    lines = [f"Latest OKX announcements for {symbol.upper()}:"]
+        return f"No recent public crypto news found for {symbol.upper()}."
+    lines = [f"Latest public crypto news for {symbol.upper()}:"]
     for idx, item in enumerate(items, 1):
-        lines.append(f"{idx}. {item.get('title', 'Untitled')} - {item.get('url', '')}")
+        source = item.get("source", "news")
+        title = item.get("title", "Untitled")
+        url = item.get("url", "")
+        lines.append(f"{idx}. [{source}] {title} - {url}")
     return "\n".join(lines)

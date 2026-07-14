@@ -26,7 +26,7 @@ from config import (
 from .budget import LLMBudget, LLMBudgetExhausted
 from .llm import LLMInvalidResponseError, LLMProviderError, OpenAICompatibleLLMClient
 from .models import AnalystEvent, AnalystStatus, AnalystValidationError, validate_analyst_payload
-from .news import fetch_okx_announcements, format_news_message
+from .news import build_news_snapshot, format_news_message
 from .store import AnalystEventStore
 
 
@@ -75,9 +75,11 @@ class AnalystService:
         scope: str = "interactive",
     ) -> AnalystEvent:
         normalized_symbol = _normalize_symbol(symbol)
+        news_snapshot = build_news_snapshot(symbol=normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
             "market_snapshot": market_snapshot or {"status": "snapshot_unavailable"},
+            "news_snapshot": news_snapshot,
             "task": (
                 "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
                 "Use only BUY, SELL, REDUCE, HOLD, or AVOID. Do not include quantities, leverage, "
@@ -100,9 +102,11 @@ class AnalystService:
         scope: str = "interactive",
     ) -> AnalystEvent:
         normalized_symbol = _normalize_symbol(symbol)
+        news_snapshot = build_news_snapshot(symbol=normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
             "question": str(question or "").strip(),
+            "news_snapshot": news_snapshot,
             "task": (
                 "Answer as an analyst. Return strict JSON with recommendation, confidence, rationale, "
                 "risk_notes, invalidation. If the question is not a trade view, use HOLD and explain why. "
@@ -128,10 +132,12 @@ class AnalystService:
         related = next((event for event in self.events() if event.get("id") == alert_id), None)
         if related and normalized_symbol == "ALL":
             normalized_symbol = _normalize_symbol(str(related.get("symbol", "ALL")))
+        news_snapshot = build_news_snapshot(symbol=normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
             "alert_id": alert_id,
             "related_alert": related or {},
+            "news_snapshot": news_snapshot,
             "task": (
                 "Act as risk validator. Return strict JSON with recommendation, confidence, rationale, "
                 "risk_notes, invalidation. Do not include quantities, leverage, orders, exchange commands, "
@@ -162,6 +168,7 @@ class AnalystService:
             "symbol": _normalize_symbol(str(related.get("symbol", "ALL"))),
             "alert_id": alert_id,
             "related_alert": related,
+            "news_snapshot": build_news_snapshot(symbol=_normalize_symbol(str(related.get("symbol", "ALL")))),
             "task": (
                 "Explain this existing alert in fresh, plainer language for a human analyst. "
                 "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
@@ -182,27 +189,27 @@ class AnalystService:
         related = next((event for event in self.events() if event.get("id") == alert_id), None)
         if related and normalized_symbol == "ALL":
             normalized_symbol = _normalize_symbol(str(related.get("symbol", "ALL")))
-        try:
-            items = fetch_okx_announcements(symbol=normalized_symbol, limit=5)
+        snapshot = build_news_snapshot(symbol=normalized_symbol, limit=8)
+        if snapshot.get("status") == "ok":
             event = AnalystEvent(
                 event_type="news",
                 status="ok",
-                title=f"{normalized_symbol} OKX announcements",
-                message=format_news_message(items, symbol=normalized_symbol),
+                title=f"{normalized_symbol} public crypto news",
+                message=format_news_message(snapshot, symbol=normalized_symbol),
                 symbol=normalized_symbol,
                 role="system",
-                payload={"alert_id": alert_id, "source": "okx_announcements", "items": items},
+                payload={"alert_id": alert_id, **snapshot},
             )
-        except Exception as exc:
+        else:
             event = AnalystEvent(
                 event_type="news",
                 status="error",
-                title=f"{normalized_symbol} OKX announcements unavailable",
-                message=f"OKX announcements unavailable: {exc}",
+                title=f"{normalized_symbol} public crypto news unavailable",
+                message=f"Public crypto news unavailable: {snapshot.get('error', 'unknown error')}",
                 symbol=normalized_symbol,
                 role="system",
-                error_code=type(exc).__name__,
-                payload={"alert_id": alert_id, "source": "okx_announcements"},
+                error_code="news_unavailable",
+                payload={"alert_id": alert_id, **snapshot},
             )
         return self.store.append(event)
 
@@ -279,6 +286,7 @@ class AnalystService:
                 "scope": scope,
                 "alert_id": prompt_payload.get("alert_id", ""),
                 "market_snapshot": prompt_payload.get("market_snapshot", {}),
+                "news_snapshot": prompt_payload.get("news_snapshot", {}),
             },
         )
         return self.store.append(event)
