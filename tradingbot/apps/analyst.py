@@ -4,6 +4,10 @@
 def main() -> None:
     import argparse
 
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
     from tradingbot.analyst.scanner import create_default_scanner
 
     parser = argparse.ArgumentParser(description="Run analyst-only public-data scanner.")
