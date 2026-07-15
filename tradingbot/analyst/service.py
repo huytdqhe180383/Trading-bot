@@ -336,31 +336,43 @@ class AnalystService:
                 "No quantities, leverage, orders, exchange commands, or target allocations.",
             ),
         ):
-            self.budget.reserve("background")
-            raw = self.background_llm_client.chat_json(
-                messages=[
+            try:
+                self.budget.reserve("background")
+                raw = self.background_llm_client.chat_json(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                f"You are the {role.replace('_', ' ')} in an analyst-only crypto research team. "
+                                "You are advisory only. Output only strict JSON."
+                            ),
+                        },
+                        {"role": "user", "content": _json_prompt({**prompt_payload, "task": task, "auxiliary_role": role})},
+                    ],
+                )
+                parsed = validate_analyst_payload(raw)
+                views.append(
                     {
-                        "role": "system",
-                        "content": (
-                            f"You are the {role.replace('_', ' ')} in an analyst-only crypto research team. "
-                            "You are advisory only. Output only strict JSON."
-                        ),
-                    },
-                    {"role": "user", "content": _json_prompt({**prompt_payload, "task": task, "auxiliary_role": role})},
-                ],
-            )
-            parsed = validate_analyst_payload(raw)
-            views.append(
-                {
-                    "role": role,
-                    "recommendation": parsed["recommendation"],
-                    "confidence": parsed["confidence"],
-                    "rationale": parsed["rationale"],
-                    "risk_notes": parsed["risk_notes"],
-                    "invalidation": parsed["invalidation"],
-                    "llm_model": getattr(self.background_llm_client, "model", ""),
-                }
-            )
+                        "role": role,
+                        "status": "ok",
+                        "recommendation": parsed["recommendation"],
+                        "confidence": parsed["confidence"],
+                        "rationale": parsed["rationale"],
+                        "risk_notes": parsed["risk_notes"],
+                        "invalidation": parsed["invalidation"],
+                        "llm_model": getattr(self.background_llm_client, "model", ""),
+                    }
+                )
+            except (LLMBudgetExhausted, LLMProviderError, LLMInvalidResponseError, AnalystValidationError) as exc:
+                views.append(
+                    {
+                        "role": role,
+                        "status": "unavailable",
+                        "error_code": type(exc).__name__,
+                        "message": str(exc),
+                        "llm_model": getattr(self.background_llm_client, "model", ""),
+                    }
+                )
         return views
 
     def _record_failure(

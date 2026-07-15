@@ -14,5 +14,6 @@ python-multipart>=0.0.20
 python-dotenv>=1.0.0
 requests>=2.31.0
 uvicorn>=0.48.0
+websockets>=15.0.1
 loguru>=0.7.2
 discord.py>=2.6.0

@@ -174,7 +174,7 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertIn("auxiliary_views", prompt)
             self.assertIn("Do not default to HOLD merely because the answer is advisory", prompt)
 
-    def test_auxiliary_agent_error_blocks_interactive_main_without_fallback(self):
+    def test_auxiliary_agent_error_does_not_block_interactive_main(self):
         with TemporaryDirectory() as tmp_name:
             base = Path(tmp_name)
             interactive_llm = _FakeLLM()
@@ -190,9 +190,12 @@ class AnalystServiceTest(unittest.TestCase):
             with patch("tradingbot.analyst.service.fetch_public_snapshot", return_value={"source": "okx_public"}):
                 event = service.ask(question="Should I take a position?", symbol="BTCUSDT")
 
-            self.assertEqual(event.status, "error")
-            self.assertIsNone(event.recommendation)
-            self.assertEqual(interactive_llm.calls, 0)
+            self.assertEqual(event.status, "ok")
+            self.assertEqual(event.recommendation, "HOLD")
+            self.assertEqual(interactive_llm.calls, 1)
+            self.assertEqual(background_llm.calls, 2)
+            self.assertEqual(event.payload["auxiliary_views"][0]["status"], "unavailable")
+            self.assertIn("weak model down", interactive_llm.last_kwargs["messages"][1]["content"])
 
 
 if __name__ == "__main__":
