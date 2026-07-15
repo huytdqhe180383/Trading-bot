@@ -4,6 +4,7 @@ FastAPI app for the private trading-bot UI.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import subprocess
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,6 +30,7 @@ from config import (
     UI_ALLOWED_TAILSCALE_USERS,
     UI_CONTROL_RATE_LIMIT,
     UI_CONTROL_USE_SUDO,
+    UI_CORS_ALLOWED_ORIGINS,
     UI_ENABLE_CONTROLS,
     UI_LOGIN_RATE_LIMIT,
     UI_PASSWORD,
@@ -52,6 +55,7 @@ from ui.services import (
     safe_compact_report_path,
 )
 from tradingbot.analyst import AnalystService, create_default_analyst_service
+from tradingbot.analyst.market import fetch_public_candles
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
@@ -86,12 +90,15 @@ class UIAppContext:
     control_runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None
     rate_limiter: InMemoryRateLimiter = field(default_factory=InMemoryRateLimiter)
     analyst_service: AnalystService | None = None
+    cors_allowed_origins: tuple[str, ...] = UI_CORS_ALLOWED_ORIGINS
 
 
 class AnalystRunRequest(BaseModel):
     symbol: str = "ALL"
     question: str | None = None
     validate_alert_id: str | None = None
+    explain_alert_id: str | None = None
+    latest_news: bool = False
     market_snapshot: dict[str, Any] | None = None
 
 
@@ -234,6 +241,14 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
         https_only=False,
         max_age=context.session_max_age_secs,
     )
+    if context.cors_allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(context.cors_allowed_origins),
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
+        )
     app.mount("/static", StaticFiles(directory=str(UI_ROOT / "static")), name="static")
 
     @app.get("/health")
@@ -438,7 +453,11 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
     @app.post("/api/analyst/run")
     async def api_analyst_run(request: Request, payload: AnalystRunRequest) -> JSONResponse:
         _require_api_auth(request, context)
-        if payload.validate_alert_id:
+        if payload.explain_alert_id:
+            event = context.analyst_service.explain(alert_id=payload.explain_alert_id)
+        elif payload.latest_news:
+            event = context.analyst_service.latest_news(symbol=payload.symbol)
+        elif payload.validate_alert_id:
             event = context.analyst_service.validate(
                 alert_id=payload.validate_alert_id,
                 symbol=payload.symbol,
@@ -473,6 +492,29 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
         _require_api_auth(request, context)
         return JSONResponse(context.analyst_service.budget.snapshot())
 
+    @app.get("/api/market/candles")
+    async def api_market_candles(
+        request: Request,
+        symbol: str = "BTCUSDT",
+        interval: str = "1h",
+        limit: int = 500,
+    ) -> JSONResponse:
+        _require_api_auth(request, context)
+        try:
+            candles = fetch_public_candles(symbol=symbol, interval=interval, limit=limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"OKX public candle fetch failed: {exc}") from exc
+        return JSONResponse(
+            {
+                "symbol": symbol.upper(),
+                "interval": interval,
+                "source": "okx_public",
+                "candles": candles,
+            }
+        )
+
     @app.websocket("/ws/analyst")
     async def ws_analyst(websocket: WebSocket) -> None:
         if not websocket.session.get("authenticated"):
@@ -482,7 +524,10 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
         try:
             await websocket.send_json({"type": "analyst_events", "events": context.analyst_service.events()})
             while True:
-                await websocket.receive_text()
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                except TimeoutError:
+                    await websocket.send_json({"type": "analyst_events", "events": context.analyst_service.events()})
         except WebSocketDisconnect:
             return
 

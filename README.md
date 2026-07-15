@@ -252,6 +252,43 @@ Related docs:
 - `docs/shared_private_ui_tailscale_guide.md`
 - `report/important/secure_private_ui_security_baseline.md`
 
+## TradingView-style analyst web UI
+
+The `frontend/` app is a chart-first analyst dashboard inspired by the LDM
+TradingView-style UI. It uses this repository as the authority for market data
+and analyst interaction:
+
+- OKX public candles from `GET /api/market/candles`
+- analyst events from `GET /api/analyst/events`
+- analyst commands through `POST /api/analyst/run`
+- live analyst event hydration through `WS /ws/analyst`
+
+Local run:
+
+```powershell
+python scripts/run_ui.py
+cd frontend
+npm install
+npm run dev
+```
+
+Then open `http://127.0.0.1:3000`. If the dashboard asks you to log in, use the
+backend login at `http://127.0.0.1:8080/login` first so the frontend can reuse
+the private UI session cookie.
+
+Frontend env:
+
+- `NEXT_PUBLIC_API_URL=http://127.0.0.1:8080`
+- `NEXT_PUBLIC_WS_URL=ws://127.0.0.1:8080/ws/analyst`
+- `UI_CORS_ALLOWED_ORIGINS=http://127.0.0.1:3000,http://localhost:3000`
+
+Scope guardrails:
+
+- chart data uses OKX public endpoints only
+- no exchange credentials are exposed to the frontend
+- sidebar actions are advisory only
+- LLM errors remain visible errors; no fallback recommendation is generated
+
 TradingAgents local research mode:
 
 - `TRADINGAGENTS_PROVIDER_FALLBACKS` in `config.py` controls order.

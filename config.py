@@ -245,6 +245,7 @@ UI_TARGET_SERVICE = _env_str("UI_TARGET_SERVICE", "trading-bot")
 UI_TRUST_TAILSCALE_HEADERS = _env_bool("UI_TRUST_TAILSCALE_HEADERS", False)
 UI_ALLOWED_TAILSCALE_USERS = _env_csv("UI_ALLOWED_TAILSCALE_USERS", ())
 UI_ADMIN_TAILSCALE_USERS = _env_csv("UI_ADMIN_TAILSCALE_USERS", ())
+UI_CORS_ALLOWED_ORIGINS = _env_csv("UI_CORS_ALLOWED_ORIGINS", ("http://127.0.0.1:3000", "http://localhost:3000"))
 
 # ============================================================
 # ANALYST-ONLY LLM / DISCORD SETTINGS

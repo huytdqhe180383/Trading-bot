@@ -11,6 +11,15 @@ OKX_SYMBOL_MAP = {
     "BTCUSDT": "BTC-USDT",
     "ETHUSDT": "ETH-USDT",
 }
+OKX_INTERVAL_MAP = {
+    "1m": "1m",
+    "5m": "5m",
+    "15m": "15m",
+    "1h": "1H",
+    "4h": "4H",
+    "1d": "1D",
+}
+MAX_CHART_CANDLES = 1000
 
 
 def fetch_public_snapshot(symbol: str, *, timeout_secs: float = 10.0) -> dict[str, Any]:
@@ -26,6 +35,55 @@ def fetch_public_snapshot(symbol: str, *, timeout_secs: float = 10.0) -> dict[st
         "one_hour": _summarize_candles(candles_1h),
         "fifteen_minute": _summarize_candles(candles_15m),
     }
+
+
+def fetch_public_candles(
+    symbol: str,
+    *,
+    interval: str = "1h",
+    limit: int = 500,
+    timeout_secs: float = 10.0,
+) -> list[dict[str, float | int | str]]:
+    """Fetch normalized public OHLCV candles for charting.
+
+    This intentionally uses OKX public market data only. It does not require or
+    touch private exchange credentials.
+    """
+    normalized = str(symbol or "BTCUSDT").upper()
+    if normalized not in OKX_SYMBOL_MAP:
+        raise ValueError("Unsupported symbol. Supported symbols: BTCUSDT, ETHUSDT.")
+
+    normalized_interval = str(interval or "1h").strip()
+    okx_bar = OKX_INTERVAL_MAP.get(normalized_interval)
+    if not okx_bar:
+        raise ValueError("Unsupported interval. Supported intervals: 1m, 5m, 15m, 1h, 4h, 1d.")
+
+    bounded_limit = max(1, min(int(limit), MAX_CHART_CANDLES))
+    rows = _fetch_okx_candles(
+        inst_id=OKX_SYMBOL_MAP[normalized],
+        bar=okx_bar,
+        limit=bounded_limit,
+        timeout_secs=timeout_secs,
+    )
+    candles: list[dict[str, float | int | str]] = []
+    for row in rows:
+        if len(row) < 6:
+            continue
+        timestamp_ms = int(float(row[0]))
+        candles.append(
+            {
+                "time": timestamp_ms // 1000,
+                "timestamp_ms": timestamp_ms,
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": float(row[5]),
+                "symbol": normalized,
+                "source": "okx_public",
+            }
+        )
+    return candles
 
 
 def _fetch_okx_candles(*, inst_id: str, bar: str, limit: int, timeout_secs: float) -> list[list[str]]:

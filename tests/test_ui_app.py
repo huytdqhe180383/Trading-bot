@@ -3,6 +3,7 @@ import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -372,6 +373,42 @@ class UIAppTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["interactive_limit"], 12)
 
+    def test_market_candles_endpoint_uses_public_okx_shape(self):
+        client, tmp = self._build_client()
+        with tmp, patch("ui.app.fetch_public_candles") as fetch:
+            self._login(client)
+            fetch.return_value = [
+                {
+                    "time": 1800000000,
+                    "timestamp_ms": 1800000000000,
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 100.5,
+                    "volume": 12.0,
+                    "symbol": "BTCUSDT",
+                    "source": "okx_public",
+                }
+            ]
+
+            response = client.get("/api/market/candles?symbol=BTCUSDT&interval=1h&limit=50")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["source"], "okx_public")
+            self.assertEqual(data["candles"][0]["close"], 100.5)
+            self.assertNotIn("api_key", str(data).lower())
+            fetch.assert_called_once_with(symbol="BTCUSDT", interval="1h", limit=50)
+
+    def test_market_candles_rejects_unsupported_inputs(self):
+        client, tmp = self._build_client()
+        with tmp, patch("ui.app.fetch_public_candles", side_effect=ValueError("Unsupported symbol.")):
+            self._login(client)
+
+            response = client.get("/api/market/candles?symbol=DOGEUSDT&interval=1h")
+
+            self.assertEqual(response.status_code, 400)
+
 
 class _FakeBudget:
     def snapshot(self):
@@ -408,6 +445,12 @@ class _FakeAnalystService:
         return self.event
 
     def validate(self, **kwargs):
+        return self.event
+
+    def explain(self, **kwargs):
+        return self.event
+
+    def latest_news(self, **kwargs):
         return self.event
 
     def events(self, limit=None):
