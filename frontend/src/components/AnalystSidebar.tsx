@@ -21,17 +21,32 @@ type AnalystSidebarProps = {
   setError: (message: string) => void;
 };
 
+type UserChatMessage = {
+  id: string;
+  kind: "user";
+  message: string;
+  symbol: string;
+  created_at_utc: string;
+};
+
+type ChatItem =
+  | { kind: "event"; event: AnalystEvent; created_at_utc: string }
+  | UserChatMessage;
+
 export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSidebarProps) {
   const [question, setQuestion] = useState("");
   const [budget, setBudget] = useState<AnalystBudget | null>(null);
   const [authNeeded, setAuthNeeded] = useState(false);
+  const [userMessages, setUserMessages] = useState<UserChatMessage[]>([]);
+  const [newsEvent, setNewsEvent] = useState<AnalystEvent | null>(null);
+  const [newsOpen, setNewsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const { symbol, events, selectedEventId, setEvents, upsertEvent, setSelectedEventId } = useTradingStore();
+  const { symbol, events, selectedEventId, upsertEvent, setSelectedEventId } = useTradingStore();
 
   useEffect(() => {
     Promise.all([fetchAnalystEvents(), fetchAnalystBudget()])
       .then(([initialEvents, budgetSnapshot]) => {
-        setEvents(initialEvents);
+        initialEvents.forEach((event) => upsertEvent(event));
         setBudget(budgetSnapshot);
         setAuthNeeded(false);
       })
@@ -40,7 +55,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
         setAuthNeeded(message.toLowerCase().includes("authentication"));
         setError(message);
       });
-  }, [setError, setEvents]);
+  }, [setError, upsertEvent]);
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
@@ -48,7 +63,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
       try {
         const data = JSON.parse(message.data) as { type?: string; events?: AnalystEvent[]; event?: AnalystEvent };
         if (data.type === "analyst_events" && Array.isArray(data.events)) {
-          setEvents(data.events);
+          data.events.forEach((event) => upsertEvent(event));
         }
         if (data.event) {
           upsertEvent(data.event);
@@ -61,15 +76,20 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
       if (event.code === 1008) setAuthNeeded(true);
     };
     return () => ws.close();
-  }, [setEvents, upsertEvent]);
+  }, [upsertEvent]);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [events.length]);
+  }, [events.length, userMessages.length]);
 
-  const selectedEvent = events.find((event) => event.id === selectedEventId) || events.at(-1);
+  const chatEvents = events.filter((event) => event.event_type !== "news");
+  const chatItems: ChatItem[] = [
+    ...chatEvents.map((event) => ({ kind: "event" as const, event, created_at_utc: event.created_at_utc })),
+    ...userMessages,
+  ].sort((left, right) => new Date(left.created_at_utc).getTime() - new Date(right.created_at_utc).getTime());
+  const selectedEvent = chatEvents.find((event) => event.id === selectedEventId) || chatEvents.at(-1);
 
   const runAction = async (action: "ask" | "validate" | "explain" | "news") => {
     setBusy(true);
@@ -77,7 +97,18 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
     try {
       let event: AnalystEvent;
       if (action === "ask") {
-        event = await askAnalyst(symbol, question.trim());
+        const asked = question.trim();
+        setUserMessages((messages) => [
+          ...messages,
+          {
+            id: `user-${Date.now()}`,
+            kind: "user",
+            message: asked,
+            symbol,
+            created_at_utc: new Date().toISOString(),
+          },
+        ]);
+        event = await askAnalyst(symbol, asked);
         setQuestion("");
       } else if (action === "validate") {
         event = await validateAnalystEvent(symbol, selectedEvent?.id || "");
@@ -85,8 +116,13 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
         event = await explainAnalystEvent(selectedEvent?.id || "");
       } else {
         event = await fetchLatestNews(symbol);
+        setNewsEvent(event);
+        setNewsOpen(true);
       }
-      upsertEvent(event);
+
+      if (action !== "news") {
+        upsertEvent(event);
+      }
       const nextBudget = await fetchAnalystBudget().catch(() => null);
       if (nextBudget) setBudget(nextBudget);
     } catch (error) {
@@ -108,7 +144,10 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
     <aside className="sidebar">
       <div className="sidebar-header">
         <h2>Analyst chat</h2>
-        <p>Main LLM only. Advisory output is allowed; order sizing, leverage, exchange commands, and autonomous execution stay forbidden.</p>
+        <p>
+          Main Analyst for chat/deep analysis, Risk Validator for checks. Advisory output is allowed; order sizing,
+          leverage, exchange commands, and autonomous execution stay forbidden.
+        </p>
         {budget && (
           <p>
             Interactive budget: {budget.interactive_used}/{budget.interactive_limit} · Background: {budget.background_used}/
@@ -123,7 +162,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
       </div>
 
       <div ref={scrollRef} className="events">
-        {events.length === 0 ? (
+        {chatItems.length === 0 ? (
           <div className="event-card">
             <div className="event-meta">
               <span>System</span>
@@ -132,29 +171,40 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
             <p className="event-message">No analyst events yet. Ask a question, request an update, or fetch latest news.</p>
           </div>
         ) : (
-          events.map((event) => (
-            <button
-              className={`event-card ${event.status === "ok" ? "" : "error"}`}
-              key={event.id}
-              onClick={() => setSelectedEventId(event.id)}
-              style={{ textAlign: "left", color: "inherit", cursor: "pointer" }}
-              type="button"
-            >
-              <div className="event-meta">
-                <span>{event.role || event.event_type}</span>
-                <span>{formatTime(event.created_at_utc)}</span>
+          chatItems.map((item) =>
+            item.kind === "user" ? (
+              <div className="event-card user" key={item.id}>
+                <div className="event-meta">
+                  <span>You · {item.symbol}</span>
+                  <span>{formatTime(item.created_at_utc)}</span>
+                </div>
+                <div className="event-title">Question</div>
+                <p className="event-message">{item.message}</p>
               </div>
-              <div className="event-title">
-                {event.recommendation && <span className="recommendation">{event.recommendation}</span>} {event.title}
-              </div>
-              <p className="event-message">{event.message}</p>
-              {event.error_code && (
-                <p className="event-message" style={{ color: "#fecaca", marginTop: 8 }}>
-                  Error: {event.error_code}
-                </p>
-              )}
-            </button>
-          ))
+            ) : (
+              <button
+                className={`event-card ${item.event.status === "ok" ? "" : "error"}`}
+                key={item.event.id}
+                onClick={() => setSelectedEventId(item.event.id)}
+                style={{ textAlign: "left", color: "inherit", cursor: "pointer" }}
+                type="button"
+              >
+                <div className="event-meta">
+                  <span>{item.event.role || item.event.event_type}</span>
+                  <span>{formatTime(item.event.created_at_utc)}</span>
+                </div>
+                <div className="event-title">
+                  {item.event.recommendation && <span className="recommendation">{item.event.recommendation}</span>} {item.event.title}
+                </div>
+                <p className="event-message">{item.event.message}</p>
+                {item.event.error_code && (
+                  <p className="event-message" style={{ color: "#fecaca", marginTop: 8 }}>
+                    Error: {item.event.error_code}
+                  </p>
+                )}
+              </button>
+            ),
+          )
         )}
       </div>
 
@@ -182,7 +232,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
         <div className="hint">
           {busy ? (
             <>
-              <CheckCircle2 size={13} /> Analyst request in progress…
+              <CheckCircle2 size={13} /> Analyst request in progress...
             </>
           ) : (
             <>
@@ -191,6 +241,25 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
           )}
         </div>
       </form>
+
+      {newsOpen && newsEvent && (
+        <div className="news-overlay" role="dialog" aria-modal="true" aria-labelledby="news-modal-title">
+          <div className="news-modal">
+            <div className="news-modal-header">
+              <div>
+                <h3 id="news-modal-title">{newsEvent.title}</h3>
+                <p className="hint">
+                  {formatTime(newsEvent.created_at_utc)} · {newsEvent.symbol}
+                </p>
+              </div>
+              <button className="button" onClick={() => setNewsOpen(false)} type="button">
+                Close
+              </button>
+            </div>
+            <p className="event-message">{newsEvent.message}</p>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

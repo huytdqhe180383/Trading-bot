@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from tradingbot.analyst.budget import LLMBudget
 from tradingbot.analyst.llm import LLMProviderError
@@ -19,9 +20,11 @@ class _FakeLLM:
         }
         self.error = error
         self.calls = 0
+        self.last_kwargs = {}
 
     def chat_json(self, **kwargs):
         self.calls += 1
+        self.last_kwargs = kwargs
         if self.error:
             raise self.error
         return self.result
@@ -155,6 +158,19 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertEqual(interactive_llm.calls, 1)
             self.assertEqual(background_event.payload["llm_model"], "cheap-model")
             self.assertEqual(chat_event.payload["llm_model"], "strong-model")
+
+    def test_ask_prompt_includes_public_market_snapshot_for_position_advice(self):
+        with TemporaryDirectory() as tmp_name:
+            tmp = type("Tmp", (), {"name": tmp_name})
+            llm = _FakeLLM()
+            service = self._service(tmp, llm=llm)
+
+            with patch("tradingbot.analyst.service.fetch_public_snapshot", return_value={"source": "okx_public"}):
+                service.ask(question="Should I take a position now?", symbol="BTCUSDT")
+
+            prompt = llm.last_kwargs["messages"][1]["content"]
+            self.assertIn("market_snapshot", prompt)
+            self.assertIn("Do not default to HOLD merely because the answer is advisory", prompt)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ from config import (
 
 from .budget import LLMBudget, LLMBudgetExhausted
 from .llm import LLMInvalidResponseError, LLMProviderError, OpenAICompatibleLLMClient
+from .market import fetch_public_snapshot
 from .models import AnalystEvent, AnalystStatus, AnalystValidationError, validate_analyst_payload
 from .news import build_news_snapshot, format_news_message
 from .store import AnalystEventStore
@@ -110,14 +111,21 @@ class AnalystService:
     ) -> AnalystEvent:
         normalized_symbol = _normalize_symbol(symbol)
         news_snapshot = build_news_snapshot(symbol=normalized_symbol)
+        market_snapshot = _safe_public_snapshot(normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
             "question": str(question or "").strip(),
+            "market_snapshot": market_snapshot,
             "news_snapshot": news_snapshot,
             "task": (
                 "Answer as an analyst. Return strict JSON with recommendation, confidence, rationale, "
-                "risk_notes, invalidation. If the question is not a trade view, use HOLD and explain why. "
-                "Do not include quantities, leverage, orders, exchange commands, or target allocations."
+                "risk_notes, invalidation. If the user explicitly asks for position advice, give a "
+                "directional advisory view using BUY, SELL, REDUCE, HOLD, or AVOID based on the supplied "
+                "public market snapshot and news. Do not default to HOLD merely because the answer is "
+                "advisory; use HOLD only when the evidence is genuinely balanced or insufficient. If the "
+                "question is not about market direction, recommendation may be HOLD while the rationale "
+                "answers the question. Do not include quantities, leverage, orders, exchange commands, "
+                "or target allocations."
             ),
         }
         return self._call_role(
@@ -384,6 +392,17 @@ def _json_prompt(payload: dict[str, Any]) -> str:
     import json
 
     return json.dumps(payload, ensure_ascii=True, sort_keys=True)
+
+
+def _safe_public_snapshot(symbol: str) -> dict[str, Any]:
+    if symbol == "ALL":
+        return {"status": "snapshot_unavailable", "reason": "symbol_all"}
+    try:
+        snapshot = fetch_public_snapshot(symbol)
+        snapshot["status"] = "ok"
+        return snapshot
+    except Exception as exc:
+        return {"status": "snapshot_unavailable", "error": str(exc)}
 
 
 def _normalize_llm_scope(scope: str) -> str:

@@ -300,6 +300,11 @@ button {
   background: rgba(127, 29, 29, 0.16);
 }
 
+.event-card.user {
+  border-color: rgba(56, 189, 248, 0.38);
+  background: rgba(8, 47, 73, 0.34);
+}
+
 .event-meta {
   display: flex;
   align-items: center;
@@ -345,6 +350,43 @@ button {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.news-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.news-modal {
+  width: min(760px, 94vw);
+  max-height: 82vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--panel-strong);
+  box-shadow: 0 28px 110px rgba(0, 0, 0, 0.46);
+  padding: 18px;
+}
+
+.news-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+}
+
+.news-modal-header h3 {
+  margin: 0;
+  font-size: 18px;
 }
 
 .composer-row {
