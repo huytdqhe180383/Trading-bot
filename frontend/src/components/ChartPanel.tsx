@@ -6,16 +6,20 @@ import {
   ColorType,
   createChart,
   createSeriesMarkers,
+  HistogramSeries,
   IChartApi,
+  IPriceLine,
   ISeriesApi,
   ISeriesMarkersPluginApi,
   LineSeries,
+  LineStyle,
   MouseEventParams,
   SeriesMarker,
   Time,
   UTCTimestamp,
 } from "lightweight-charts";
 import { fetchAnalystSignals, fetchCandles } from "@/lib/api";
+import { calculateSupportResistance } from "@/lib/chartAnalysis";
 import type { AnalystEvent, Candle } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
 
@@ -36,21 +40,23 @@ const markerColor: Record<string, string> = {
   HOLD: "#94a3b8",
   AVOID: "#f97316",
 };
-const CANDLE_REFRESH_MS = 15_000;
+const CANDLE_REFRESH_MS = Math.max(1_000, Number(process.env.NEXT_PUBLIC_CANDLE_REFRESH_MS || 5_000));
 const SIGNAL_REFRESH_MS = 10_000;
 
 export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram", Time> | null>(null);
   const markerApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const indicatorSeriesRef = useRef<ISeriesApi<"Line", Time>[]>([]);
   const drawingSeriesRef = useRef<ISeriesApi<"Line", Time>[]>([]);
+  const supportResistanceLinesRef = useRef<IPriceLine[]>([]);
   const pendingPointRef = useRef<DrawingPoint | null>(null);
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState("");
-  const { symbol, interval, indicators, setEvents, events } = useTradingStore();
+  const { symbol, interval, indicators, setEvents, events, supportResistanceRequest, clearChartOverlaysRequestId } = useTradingStore();
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -83,9 +89,23 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
       wickDownColor: "#ef4444",
       borderVisible: false,
     });
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      color: "rgba(148, 163, 184, 0.34)",
+      priceFormat: { type: "volume" },
+      priceScaleId: "volume",
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    chart.priceScale("volume").applyOptions({
+      scaleMargins: {
+        top: 0.82,
+        bottom: 0,
+      },
+    });
 
     chartRef.current = chart;
     candleSeriesRef.current = candlesSeries;
+    volumeSeriesRef.current = volumeSeries;
     markerApiRef.current = createSeriesMarkers(candlesSeries, []);
 
     const resizeObserver = new ResizeObserver(([entry]) => {
@@ -101,9 +121,11 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
       markerApiRef.current = null;
       indicatorSeriesRef.current = [];
       drawingSeriesRef.current = [];
+      supportResistanceLinesRef.current = [];
       pendingPointRef.current = null;
     };
   }, []);
@@ -128,6 +150,13 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
             high: row.high,
             low: row.low,
             close: row.close,
+          })),
+        );
+        volumeSeriesRef.current?.setData(
+          rows.map((row) => ({
+            time: row.time as UTCTimestamp,
+            value: row.volume,
+            color: row.close >= row.open ? "rgba(16, 185, 129, 0.28)" : "rgba(239, 68, 68, 0.28)",
           })),
         );
         setLastUpdated(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
@@ -230,6 +259,63 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
     chart.subscribeClick(onClick);
     return () => chart.unsubscribeClick(onClick);
   }, [drawingEnabled]);
+
+  useEffect(() => {
+    clearChartOverlays();
+  }, [clearChartOverlaysRequestId]);
+
+  useEffect(() => {
+    if (!supportResistanceRequest) return;
+    let cancelled = false;
+
+    const draw = async () => {
+      try {
+        const rows =
+          supportResistanceRequest.interval === interval && supportResistanceRequest.symbol === symbol
+            ? candles
+            : await fetchCandles(supportResistanceRequest.symbol, supportResistanceRequest.interval, 500);
+        if (cancelled) return;
+        drawSupportResistanceLines(rows, supportResistanceRequest.interval);
+      } catch (error) {
+        if (!cancelled) setError(error instanceof Error ? error.message : "Failed to draw support/resistance lines.");
+      }
+    };
+
+    void draw();
+    return () => {
+      cancelled = true;
+    };
+  }, [candles, interval, setError, supportResistanceRequest, symbol]);
+
+  const clearChartOverlays = () => {
+    const chart = chartRef.current;
+    const candleSeries = candleSeriesRef.current;
+    if (chart) {
+      drawingSeriesRef.current.forEach((series) => chart.removeSeries(series));
+    }
+    drawingSeriesRef.current = [];
+    if (candleSeries) {
+      supportResistanceLinesRef.current.forEach((line) => candleSeries.removePriceLine(line));
+    }
+    supportResistanceLinesRef.current = [];
+    pendingPointRef.current = null;
+  };
+
+  const drawSupportResistanceLines = (rows: Candle[], sourceInterval: string) => {
+    const candleSeries = candleSeriesRef.current;
+    if (!candleSeries) return;
+    supportResistanceLinesRef.current.forEach((line) => candleSeries.removePriceLine(line));
+    supportResistanceLinesRef.current = calculateSupportResistance(rows).map((line) =>
+      candleSeries.createPriceLine({
+        price: line.price,
+        color: line.kind === "support" ? "#10b981" : "#ef4444",
+        lineWidth: 2,
+        lineStyle: LineStyle.LargeDashed,
+        axisLabelVisible: true,
+        title: `${line.kind === "support" ? "S" : "R"} ${sourceInterval} (${line.touches})`,
+      }),
+    );
+  };
 
   return (
     <div className="chart-card glass-panel">

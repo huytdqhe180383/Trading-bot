@@ -154,10 +154,11 @@ class AnalystServiceTest(unittest.TestCase):
             background_event = service.run_update(symbol="BTCUSDT", scope="background")
             chat_event = service.ask(question="Deep read?", symbol="BTCUSDT", scope="interactive")
 
-            self.assertEqual(background_llm.calls, 1)
+            self.assertEqual(background_llm.calls, 3)
             self.assertEqual(interactive_llm.calls, 1)
             self.assertEqual(background_event.payload["llm_model"], "cheap-model")
             self.assertEqual(chat_event.payload["llm_model"], "strong-model")
+            self.assertEqual([view["role"] for view in chat_event.payload["auxiliary_views"]], ["technical_analyst", "news_analyst"])
 
     def test_ask_prompt_includes_public_market_snapshot_for_position_advice(self):
         with TemporaryDirectory() as tmp_name:
@@ -170,7 +171,28 @@ class AnalystServiceTest(unittest.TestCase):
 
             prompt = llm.last_kwargs["messages"][1]["content"]
             self.assertIn("market_snapshot", prompt)
+            self.assertIn("auxiliary_views", prompt)
             self.assertIn("Do not default to HOLD merely because the answer is advisory", prompt)
+
+    def test_auxiliary_agent_error_blocks_interactive_main_without_fallback(self):
+        with TemporaryDirectory() as tmp_name:
+            base = Path(tmp_name)
+            interactive_llm = _FakeLLM()
+            background_llm = _FakeLLM(error=LLMProviderError("weak model down"))
+            service = AnalystService(
+                interactive_llm_client=interactive_llm,
+                background_llm_client=background_llm,
+                budget=LLMBudget(background_daily_limit=4, interactive_daily_limit=4),
+                store=AnalystEventStore(results_dir=base / "results", reports_dir=base / "report"),
+                enabled=True,
+            )
+
+            with patch("tradingbot.analyst.service.fetch_public_snapshot", return_value={"source": "okx_public"}):
+                event = service.ask(question="Should I take a position?", symbol="BTCUSDT")
+
+            self.assertEqual(event.status, "error")
+            self.assertIsNone(event.recommendation)
+            self.assertEqual(interactive_llm.calls, 0)
 
 
 if __name__ == "__main__":

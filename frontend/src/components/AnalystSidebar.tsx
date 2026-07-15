@@ -12,6 +12,7 @@ import {
   fetchLatestNews,
   validateAnalystEvent,
 } from "@/lib/api";
+import { parseSupportResistanceInterval, wantsSupportResistance } from "@/lib/chartAnalysis";
 import type { AnalystBudget, AnalystEvent } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
 
@@ -41,7 +42,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
   const [newsEvent, setNewsEvent] = useState<AnalystEvent | null>(null);
   const [newsOpen, setNewsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const { symbol, events, selectedEventId, upsertEvent, setSelectedEventId } = useTradingStore();
+  const { symbol, events, selectedEventId, upsertEvent, setSelectedEventId, requestSupportResistance } = useTradingStore();
 
   useEffect(() => {
     Promise.all([fetchAnalystEvents(), fetchAnalystBudget()])
@@ -98,6 +99,9 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
       let event: AnalystEvent;
       if (action === "ask") {
         const asked = question.trim();
+        if (wantsSupportResistance(asked)) {
+          requestSupportResistance(parseSupportResistanceInterval(asked) || undefined);
+        }
         setUserMessages((messages) => [
           ...messages,
           {

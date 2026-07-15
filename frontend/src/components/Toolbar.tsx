@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, LineChart, Newspaper, PenLine, RefreshCcw } from "lucide-react";
+import { Bot, Eraser, LineChart, Newspaper, PenLine, RefreshCcw } from "lucide-react";
 import { fetchLatestNews, runAnalystUpdate } from "@/lib/api";
 import type { ChartInterval, IndicatorKey, SymbolCode } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
@@ -24,7 +24,17 @@ type ToolbarProps = {
 };
 
 export default function Toolbar({ drawingEnabled, busy, setBusy, setError, onToggleDrawing }: ToolbarProps) {
-  const { symbol, interval, indicators, setSymbol, setInterval, toggleIndicator, upsertEvent } = useTradingStore();
+  const {
+    symbol,
+    interval,
+    indicators,
+    setSymbol,
+    setInterval,
+    toggleIndicator,
+    upsertEvent,
+    requestSupportResistance,
+    clearChartOverlays,
+  } = useTradingStore();
 
   const runAction = async (action: "update" | "news") => {
     setBusy(true);
@@ -75,6 +85,12 @@ export default function Toolbar({ drawingEnabled, busy, setBusy, setError, onTog
       <div className="toolbar-group">
         <button className={`button ${drawingEnabled ? "primary" : "ghost"}`} onClick={onToggleDrawing} type="button">
           <PenLine size={15} /> Trendline
+        </button>
+        <button className="button" onClick={() => requestSupportResistance()} type="button">
+          <LineChart size={15} /> S/R lines
+        </button>
+        <button className="button ghost" onClick={clearChartOverlays} type="button">
+          <Eraser size={15} /> Clear lines
         </button>
         <button className="button" disabled={busy} onClick={() => runAction("update")} type="button">
           <Bot size={15} /> Analyst update

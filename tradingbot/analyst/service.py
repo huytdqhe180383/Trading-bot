@@ -246,14 +246,18 @@ class AnalystService:
         }
         try:
             self.budget.reserve(normalized_scope)
+            if role == "main_analyst" and normalized_scope == "interactive" and event_type in {"analysis", "chat_reply"}:
+                prompt_payload["auxiliary_views"] = self._build_auxiliary_views(prompt_payload)
             raw = llm_client.chat_json(
                 messages=[
                     {
                         "role": "system",
                         "content": (
-                            "You are an analyst-only crypto market assistant. "
+                            "You are a senior discretionary crypto market analyst. "
                             "You are not an autonomous trading system. "
-                            "Output only strict JSON."
+                            "Synthesize price action, levels, volume, news, uncertainty, and auxiliary analyst views. "
+                            "Be decisive when evidence is directional and humble when it is mixed. "
+                            "Output only strict JSON with natural, human-readable rationale."
                         ),
                     },
                     {"role": "user", "content": _json_prompt(prompt_payload)},
@@ -309,11 +313,55 @@ class AnalystService:
                 "alert_id": prompt_payload.get("alert_id", ""),
                 "market_snapshot": prompt_payload.get("market_snapshot", {}),
                 "news_snapshot": prompt_payload.get("news_snapshot", {}),
+                "auxiliary_views": prompt_payload.get("auxiliary_views", []),
                 "llm_scope": normalized_scope,
                 "llm_model": getattr(llm_client, "model", ""),
             },
         )
         return self.store.append(event)
+
+    def _build_auxiliary_views(self, prompt_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        views = []
+        for role, task in (
+            (
+                "technical_analyst",
+                "Focus only on public market structure, trend, momentum, support/resistance, volatility, and volume. "
+                "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
+                "No quantities, leverage, orders, exchange commands, or target allocations.",
+            ),
+            (
+                "news_analyst",
+                "Focus only on the supplied public news snapshot and event risk. "
+                "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
+                "No quantities, leverage, orders, exchange commands, or target allocations.",
+            ),
+        ):
+            self.budget.reserve("background")
+            raw = self.background_llm_client.chat_json(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            f"You are the {role.replace('_', ' ')} in an analyst-only crypto research team. "
+                            "You are advisory only. Output only strict JSON."
+                        ),
+                    },
+                    {"role": "user", "content": _json_prompt({**prompt_payload, "task": task, "auxiliary_role": role})},
+                ],
+            )
+            parsed = validate_analyst_payload(raw)
+            views.append(
+                {
+                    "role": role,
+                    "recommendation": parsed["recommendation"],
+                    "confidence": parsed["confidence"],
+                    "rationale": parsed["rationale"],
+                    "risk_notes": parsed["risk_notes"],
+                    "invalidation": parsed["invalidation"],
+                    "llm_model": getattr(self.background_llm_client, "model", ""),
+                }
+            )
+        return views
 
     def _record_failure(
         self,
