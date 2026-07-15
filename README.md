@@ -272,6 +272,12 @@ npm install
 npm run dev
 ```
 
+Restart both local servers after changing `.env`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart_analyst_web.ps1
+```
+
 Then open `http://127.0.0.1:3000`. If the dashboard asks you to log in, use the
 backend login at `http://127.0.0.1:8080/login` first so the frontend can reuse
 the private UI session cookie.
