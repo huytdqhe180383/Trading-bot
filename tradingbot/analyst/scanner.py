@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterable
 
-from config import ANALYST_SCAN_INTERVAL_SECS, SYMBOLS
+from config import ANALYST_BACKGROUND_ANALYSIS_CADENCE, ANALYST_SCAN_INTERVAL_SECS, SYMBOLS
 
 from .market import fetch_public_snapshot
 from .discord_bot import DiscordNotifier, load_discord_config_from_env
@@ -19,13 +19,14 @@ class AnalystScanner:
     service: AnalystService
     symbols: Iterable[str] = field(default_factory=lambda: tuple(SYMBOLS))
     scan_interval_secs: int = ANALYST_SCAN_INTERVAL_SECS
+    background_analysis_cadence: str = ANALYST_BACKGROUND_ANALYSIS_CADENCE
     notifier: DiscordNotifier | None = None
-    _last_hour_key: str = ""
+    _last_analysis_key: str = ""
 
     def run_once(self) -> list[dict]:
         events = []
-        hour_key = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
-        run_hourly_analysis = hour_key != self._last_hour_key
+        analysis_key = _cadence_key(datetime.now(timezone.utc), self.background_analysis_cadence)
+        run_scheduled_analysis = analysis_key != self._last_analysis_key
         for symbol in self.symbols:
             snapshot = fetch_public_snapshot(symbol)
             risk_event = _risk_trigger(snapshot)
@@ -37,7 +38,7 @@ class AnalystScanner:
                 )
                 self._notify(event)
                 events.append(event.to_public_dict())
-            elif run_hourly_analysis:
+            elif run_scheduled_analysis:
                 event = self.service.run_update(
                     symbol=symbol,
                     market_snapshot=snapshot,
@@ -45,8 +46,8 @@ class AnalystScanner:
                 )
                 self._notify(event)
                 events.append(event.to_public_dict())
-        if run_hourly_analysis:
-            self._last_hour_key = hour_key
+        if run_scheduled_analysis:
+            self._last_analysis_key = analysis_key
         return events
 
     def run_forever(self, *, max_cycles: int = 0) -> None:
@@ -80,3 +81,22 @@ def _risk_trigger(snapshot: dict) -> str:
     if float(one_hour.get("window_return_pct", 0.0)) <= -3.0:
         return "1h_drop"
     return ""
+
+
+def _cadence_key(now: datetime, cadence: str) -> str:
+    value = str(cadence or "5m").strip().lower()
+    try:
+        if value.endswith("m"):
+            minutes = max(1, int(value[:-1]))
+            total_minutes = now.hour * 60 + now.minute
+            bucket = (total_minutes // minutes) * minutes
+            return f"{now:%Y-%m-%d}T{bucket // 60:02d}:{bucket % 60:02d}"
+        if value.endswith("h"):
+            hours = max(1, int(value[:-1]))
+            bucket_hour = (now.hour // hours) * hours
+            return f"{now:%Y-%m-%d}T{bucket_hour:02d}"
+        if value.endswith("d"):
+            return now.strftime("%Y-%m-%d")
+    except ValueError:
+        pass
+    return now.strftime("%Y-%m-%dT%H:%M")

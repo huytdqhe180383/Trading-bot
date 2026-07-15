@@ -133,6 +133,29 @@ class AnalystServiceTest(unittest.TestCase):
 
             self.assertEqual(validated.symbol, "ETHUSDT")
 
+    def test_background_and_interactive_scopes_use_separate_llm_clients(self):
+        with TemporaryDirectory() as tmp_name:
+            base = Path(tmp_name)
+            interactive_llm = _FakeLLM()
+            interactive_llm.model = "strong-model"
+            background_llm = _FakeLLM()
+            background_llm.model = "cheap-model"
+            service = AnalystService(
+                interactive_llm_client=interactive_llm,
+                background_llm_client=background_llm,
+                budget=LLMBudget(background_daily_limit=4, interactive_daily_limit=4),
+                store=AnalystEventStore(results_dir=base / "results", reports_dir=base / "report"),
+                enabled=True,
+            )
+
+            background_event = service.run_update(symbol="BTCUSDT", scope="background")
+            chat_event = service.ask(question="Deep read?", symbol="BTCUSDT", scope="interactive")
+
+            self.assertEqual(background_llm.calls, 1)
+            self.assertEqual(interactive_llm.calls, 1)
+            self.assertEqual(background_event.payload["llm_model"], "cheap-model")
+            self.assertEqual(chat_event.payload["llm_model"], "strong-model")
+
 
 if __name__ == "__main__":
     unittest.main()

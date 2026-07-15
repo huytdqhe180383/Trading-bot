@@ -23,12 +23,14 @@ class OpenAICompatibleLLMClient:
         base_url: str,
         api_key: str,
         model: str,
+        model_config_name: str = "LLM_MODEL",
         timeout_secs: float = 20.0,
         post: Callable[..., Any] | None = None,
     ) -> None:
         self.base_url = str(base_url or "").rstrip("/")
         self.api_key = str(api_key or "")
         self.model = str(model or "")
+        self.model_config_name = str(model_config_name or "LLM_MODEL")
         self.timeout_secs = max(0.001, float(timeout_secs))
         self._post = post or requests.post
 
@@ -38,7 +40,7 @@ class OpenAICompatibleLLMClient:
         if not self.api_key:
             raise LLMProviderError("LLM_API_KEY is not configured.")
         if not self.model:
-            raise LLMProviderError("LLM_MODEL is not configured.")
+            raise LLMProviderError(f"{self.model_config_name} is not configured.")
 
         endpoint = f"{self.base_url}/chat/completions"
         if not self.base_url.endswith("/v1"):

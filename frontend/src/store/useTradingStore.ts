@@ -17,7 +17,7 @@ type TradingState = {
 
 export const useTradingStore = create<TradingState>((set) => ({
   symbol: "BTCUSDT",
-  interval: "1h",
+  interval: "5m",
   indicators: {
     sma20: true,
     ema50: false,

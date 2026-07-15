@@ -36,6 +36,8 @@ const markerColor: Record<string, string> = {
   HOLD: "#94a3b8",
   AVOID: "#f97316",
 };
+const CANDLE_REFRESH_MS = 15_000;
+const SIGNAL_REFRESH_MS = 10_000;
 
 export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -47,6 +49,7 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
   const pendingPointRef = useRef<DrawingPoint | null>(null);
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState("");
   const { symbol, interval, indicators, setEvents, events } = useTradingStore();
 
   useEffect(() => {
@@ -107,10 +110,15 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError("");
-    fetchCandles(symbol, interval, 500)
-      .then((rows) => {
+    let firstLoad = true;
+
+    const refreshCandles = async () => {
+      if (firstLoad) {
+        setLoading(true);
+      }
+      setError("");
+      try {
+        const rows = await fetchCandles(symbol, interval, 500);
         if (cancelled) return;
         setCandles(rows);
         candleSeriesRef.current?.setData(
@@ -122,27 +130,50 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
             close: row.close,
           })),
         );
-        chartRef.current?.timeScale().fitContent();
-      })
-      .catch((error) => {
+        setLastUpdated(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+        if (firstLoad) {
+          chartRef.current?.timeScale().fitContent();
+        }
+      } catch (error) {
         if (!cancelled) setError(error instanceof Error ? error.message : "Failed to load OKX candles.");
-      })
-      .finally(() => {
+      } finally {
+        firstLoad = false;
         if (!cancelled) setLoading(false);
-      });
+      }
+    };
+
+    void refreshCandles();
+    const timer = window.setInterval(() => {
+      void refreshCandles();
+    }, CANDLE_REFRESH_MS);
+
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [interval, setError, symbol]);
 
   useEffect(() => {
-    fetchAnalystSignals()
-      .then((signals) => {
+    let cancelled = false;
+    const refreshSignals = async () => {
+      try {
+        const signals = await fetchAnalystSignals();
+        if (cancelled) return;
         setEvents(signals);
-      })
-      .catch(() => {
+      } catch {
         // The sidebar will show auth/API problems; chart markers are advisory only.
-      });
+      }
+    };
+
+    void refreshSignals();
+    const timer = window.setInterval(() => {
+      void refreshSignals();
+    }, SIGNAL_REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [setEvents]);
 
   const markers = useMemo(() => buildMarkers(events, candles), [events, candles]);
@@ -203,8 +234,14 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
   return (
     <div className="chart-card glass-panel">
       <div ref={containerRef} className="chart-container" />
-      {loading && <div className="chart-empty">Loading OKX public candles…</div>}
+      {loading && <div className="chart-empty">Loading OKX public candles...</div>}
       {!loading && candles.length === 0 && <div className="chart-empty">No candle data available.</div>}
+      {lastUpdated && (
+        <div className="status-pill" style={{ position: "absolute", right: 16, top: 16 }}>
+          <span className="dot" />
+          Live refresh {lastUpdated}
+        </div>
+      )}
       {drawingEnabled && (
         <div className="status-pill" style={{ position: "absolute", left: 16, top: 16 }}>
           <span className="dot" style={{ background: "#f59e0b", boxShadow: "0 0 12px #f59e0b" }} />
@@ -230,7 +267,7 @@ function buildMarkers(events: AnalystEvent[], candles: Candle[]): SeriesMarker<T
         position: isBullish ? "belowBar" : "aboveBar",
         color: markerColor[recommendation] || "#94a3b8",
         shape: isBullish ? "arrowUp" : isBearish ? "arrowDown" : "circle",
-        text: `${recommendation} · ${event.role}`,
+        text: `${recommendation} - ${event.role}`,
       };
     });
 }

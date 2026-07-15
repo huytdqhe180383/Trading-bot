@@ -14,9 +14,10 @@ from config import (
     LIVE_SESSION_TIMEZONE,
     LLM_API_KEY,
     LLM_BASE_URL,
+    LLM_BACKGROUND_MODEL,
     LLM_DAILY_CALL_BUDGET,
+    LLM_INTERACTIVE_MODEL,
     LLM_INTERACTIVE_CALL_BUDGET,
-    LLM_MODEL,
     LLM_TIMEOUT_SECS,
     REPORTS_DIR,
     RESULTS_DIR,
@@ -34,13 +35,19 @@ class AnalystService:
     def __init__(
         self,
         *,
-        llm_client: OpenAICompatibleLLMClient,
+        llm_client: OpenAICompatibleLLMClient | None = None,
+        interactive_llm_client: OpenAICompatibleLLMClient | None = None,
+        background_llm_client: OpenAICompatibleLLMClient | None = None,
         budget: LLMBudget,
         store: AnalystEventStore,
         enabled: bool = False,
         event_limit: int = 200,
     ) -> None:
-        self.llm_client = llm_client
+        base_client = llm_client or interactive_llm_client or background_llm_client
+        if base_client is None:
+            raise ValueError("AnalystService requires at least one LLM client.")
+        self.interactive_llm_client = interactive_llm_client or base_client
+        self.background_llm_client = background_llm_client or base_client
         self.budget = budget
         self.store = store
         self.enabled = bool(enabled)
@@ -222,9 +229,16 @@ class AnalystService:
         prompt_payload: dict[str, Any],
         scope: str,
     ) -> AnalystEvent:
+        normalized_scope = _normalize_llm_scope(scope)
+        llm_client = self._llm_client_for_scope(normalized_scope)
+        prompt_payload = {
+            **prompt_payload,
+            "scope": normalized_scope,
+            "llm_model": getattr(llm_client, "model", ""),
+        }
         try:
-            self.budget.reserve(scope)
-            raw = self.llm_client.chat_json(
+            self.budget.reserve(normalized_scope)
+            raw = llm_client.chat_json(
                 messages=[
                     {
                         "role": "system",
@@ -283,10 +297,12 @@ class AnalystService:
             risk_notes=parsed["risk_notes"],
             invalidation=parsed["invalidation"],
             payload={
-                "scope": scope,
+                "scope": normalized_scope,
                 "alert_id": prompt_payload.get("alert_id", ""),
                 "market_snapshot": prompt_payload.get("market_snapshot", {}),
                 "news_snapshot": prompt_payload.get("news_snapshot", {}),
+                "llm_scope": normalized_scope,
+                "llm_model": getattr(llm_client, "model", ""),
             },
         )
         return self.store.append(event)
@@ -310,17 +326,34 @@ class AnalystService:
             symbol=str(prompt_payload.get("symbol", "ALL")),
             role=role,
             error_code=error_code,
-            payload={"scope": prompt_payload.get("scope", ""), "symbol": prompt_payload.get("symbol", "ALL")},
+            payload={
+                "scope": _normalize_llm_scope(str(prompt_payload.get("scope", ""))),
+                "symbol": prompt_payload.get("symbol", "ALL"),
+                "llm_model": prompt_payload.get("llm_model", ""),
+            },
         )
         return self.store.append(event)
+
+    def _llm_client_for_scope(self, scope: str) -> OpenAICompatibleLLMClient:
+        if _normalize_llm_scope(scope) == "background":
+            return self.background_llm_client
+        return self.interactive_llm_client
 
 
 def create_default_analyst_service() -> AnalystService:
     return AnalystService(
-        llm_client=OpenAICompatibleLLMClient(
+        interactive_llm_client=OpenAICompatibleLLMClient(
             base_url=LLM_BASE_URL,
             api_key=LLM_API_KEY,
-            model=LLM_MODEL,
+            model=LLM_INTERACTIVE_MODEL,
+            model_config_name="LLM_INTERACTIVE_MODEL",
+            timeout_secs=LLM_TIMEOUT_SECS,
+        ),
+        background_llm_client=OpenAICompatibleLLMClient(
+            base_url=LLM_BASE_URL,
+            api_key=LLM_API_KEY,
+            model=LLM_BACKGROUND_MODEL,
+            model_config_name="LLM_BACKGROUND_MODEL",
             timeout_secs=LLM_TIMEOUT_SECS,
         ),
         budget=LLMBudget(
@@ -351,6 +384,10 @@ def _json_prompt(payload: dict[str, Any]) -> str:
     import json
 
     return json.dumps(payload, ensure_ascii=True, sort_keys=True)
+
+
+def _normalize_llm_scope(scope: str) -> str:
+    return "background" if str(scope or "").strip().lower() == "background" else "interactive"
 
 
 def _public_event(row: dict[str, Any]) -> dict[str, Any]:

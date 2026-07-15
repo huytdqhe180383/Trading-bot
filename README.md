@@ -287,10 +287,15 @@ Frontend env:
 - `NEXT_PUBLIC_API_URL=http://127.0.0.1:8080`
 - `NEXT_PUBLIC_WS_URL=ws://127.0.0.1:8080/ws/analyst`
 - `UI_CORS_ALLOWED_ORIGINS=http://127.0.0.1:3000,http://localhost:3000`
+- `ANALYST_SCAN_INTERVAL_SECS=300`
+- `ANALYST_BACKGROUND_ANALYSIS_CADENCE=5m`
+- `LLM_BACKGROUND_MODEL=<cheaper/faster model for scanner alerts>`
+- `LLM_INTERACTIVE_MODEL=<stronger model for chat, explain, validate, deep analysis>`
 
 Scope guardrails:
 
 - chart data uses OKX public endpoints only
+- chart candles refresh in-place without page reload
 - no exchange credentials are exposed to the frontend
 - sidebar actions are advisory only
 - LLM errors remain visible errors; no fallback recommendation is generated
