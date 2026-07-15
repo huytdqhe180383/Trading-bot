@@ -292,6 +292,7 @@ Frontend env:
 - `ANALYST_BACKGROUND_ANALYSIS_CADENCE=5m`
 - `LLM_BACKGROUND_MODEL=<cheaper/faster model for scanner alerts>`
 - `LLM_INTERACTIVE_MODEL=<stronger model for chat, explain, validate, deep analysis>`
+- `LLM_USE_RESPONSE_FORMAT=false` for OpenAI-compatible providers/models that do not reliably support `response_format`
 
 Scope guardrails:
 

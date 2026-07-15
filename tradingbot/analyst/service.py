@@ -19,6 +19,7 @@ from config import (
     LLM_INTERACTIVE_MODEL,
     LLM_INTERACTIVE_CALL_BUDGET,
     LLM_TIMEOUT_SECS,
+    LLM_USE_RESPONSE_FORMAT,
     REPORTS_DIR,
     RESULTS_DIR,
     SYMBOLS,
@@ -416,6 +417,7 @@ def create_default_analyst_service() -> AnalystService:
             model=LLM_INTERACTIVE_MODEL,
             model_config_name="LLM_INTERACTIVE_MODEL",
             timeout_secs=LLM_TIMEOUT_SECS,
+            use_response_format=LLM_USE_RESPONSE_FORMAT,
         ),
         background_llm_client=OpenAICompatibleLLMClient(
             base_url=LLM_BASE_URL,
@@ -423,6 +425,7 @@ def create_default_analyst_service() -> AnalystService:
             model=LLM_BACKGROUND_MODEL,
             model_config_name="LLM_BACKGROUND_MODEL",
             timeout_secs=LLM_TIMEOUT_SECS,
+            use_response_format=LLM_USE_RESPONSE_FORMAT,
         ),
         budget=LLMBudget(
             background_daily_limit=LLM_DAILY_CALL_BUDGET,
