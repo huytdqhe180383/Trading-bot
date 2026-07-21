@@ -98,6 +98,81 @@ class RiskFirstSemiAutoTest(unittest.TestCase):
         self.assertFalse(approved_diag["reentry_locked"])
         self.assertGreater(float(approved[:-1].sum()), float(exit_weights[:-1].sum()))
 
+    def test_semi_auto_does_not_repeat_stale_drawdown_exit_after_approved_reentry(self):
+        controller = SemiAutoRiskController()
+
+        exit_weights, exit_diag = controller.apply(
+            target_weights=np.array([0.50, 0.30, 0.20], dtype=np.float32),
+            current_weights=np.array([0.50, 0.30, 0.20], dtype=np.float32),
+            session_drawdown=-0.061,
+            btc_return_24h=0.0,
+        )
+        self.assertTrue(exit_diag["risk_exit_applied"])
+        self.assertEqual(exit_diag["risk_exit_tier"], "warning")
+        self.assertLessEqual(float(exit_weights[:-1].sum()), 0.35 + 1e-6)
+
+        reentry, reentry_diag = controller.apply(
+            target_weights=np.array([0.45, 0.25, 0.30], dtype=np.float32),
+            current_weights=exit_weights,
+            session_drawdown=-0.061,
+            btc_return_24h=0.0,
+            human_approved=True,
+        )
+        self.assertFalse(reentry_diag["risk_exit_applied"])
+        self.assertFalse(reentry_diag["reentry_locked"])
+        self.assertGreater(float(reentry[:-1].sum()), float(exit_weights[:-1].sum()))
+
+        held, held_diag = controller.apply(
+            target_weights=np.array([0.45, 0.25, 0.30], dtype=np.float32),
+            current_weights=reentry,
+            session_drawdown=-0.061,
+            btc_return_24h=0.0,
+            human_approved=True,
+        )
+        self.assertFalse(held_diag["risk_exit_applied"])
+        self.assertGreater(float(held[:-1].sum()), 0.60)
+
+        worse_exit, worse_diag = controller.apply(
+            target_weights=np.array([0.45, 0.25, 0.30], dtype=np.float32),
+            current_weights=held,
+            session_drawdown=-0.075,
+            btc_return_24h=0.0,
+            human_approved=True,
+        )
+        self.assertTrue(worse_diag["risk_exit_applied"])
+        self.assertEqual(worse_diag["risk_exit_tier"], "warning")
+        self.assertLessEqual(float(worse_exit[:-1].sum()), 0.35 + 1e-6)
+
+    def test_backtest_environment_reentry_is_not_permanently_blocked_by_stale_warning_drawdown(self):
+        idx = pd.date_range("2026-01-01", periods=45, freq="h", tz="UTC")
+        base = pd.DataFrame(
+            {
+                "atr_14": [0.0] * 45,
+                "bb_width": [0.0] * 45,
+                "macd_1d": [0.0] * 45,
+                "raw_dist_sma_200_1d": [0.0] * 45,
+                "log_return_1h": [0.0] * 45,
+            },
+            index=idx,
+        )
+        data = {"BTCUSDT": base.copy(), "ETHUSDT": base.copy()}
+        env = SpotPortfolioEnv(data, initial_capital=100.0, lookback=30, mode="eval")
+        env.reset()
+        env._weights = np.array([0.50, 0.30, 0.20], dtype=np.float32)
+        env._max_portfolio = 100.0
+        env._portfolio = 93.9
+
+        _, _, _, _, exit_info = env.step_weights(np.array([0.50, 0.30, 0.20], dtype=np.float32))
+        self.assertTrue(exit_info["risk_exit_applied"])
+        self.assertEqual(exit_info["risk_exit_tier"], "warning")
+        self.assertLessEqual(float(env._weights[:-1].sum()), 0.35 + 1e-6)
+        env._bars_since_last_material_trade = 999
+
+        _, _, _, _, reentry_info = env.step_weights(np.array([0.50, 0.30, 0.20], dtype=np.float32))
+
+        self.assertFalse(reentry_info["risk_exit_applied"])
+        self.assertGreater(float(env._weights[:-1].sum()), 0.60)
+
     def test_live_controller_hard_risk_exit_overrides_deadband(self):
         controller = LiveExecutionController()
         idx = pd.date_range("2026-01-01", periods=25, freq="h", tz="UTC")
