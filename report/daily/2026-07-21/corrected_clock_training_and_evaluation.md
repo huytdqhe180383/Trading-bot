@@ -14,6 +14,10 @@ Decision: do not promote this model as a reliable LLM-agent source yet. The corr
 - `tests/test_audit_hotfixes.py`: added a direct clock regression test and updated kill-switch/trailing-stop tests to inject returns at the next unseen candle.
 - `train.py`: added `--models-dir` plumbing for train, resume, checkpoint, and post-training backtest paths.
 - `tests/test_train_hygiene.py`: verifies the post-training backtest command passes the exact model directory.
+- `backtest.py`: added a circular block-bootstrap statistical report for normal backtest runs, including strategy confidence intervals and probability of improvement versus cash, BTC buy-and-hold, ETH buy-and-hold, and equal-weight rebalanced baselines.
+- `tests/test_backtest_session_outputs.py`: verifies bootstrap interval generation, baseline improvement probabilities, tiny-series handling, and JSON artifact writing.
+- `tradingbot/analyst/rl_evidence.py` and `scripts/build_rl_evidence.py`: added optional statistical-report ingestion so analyst LLM envelopes can expose safe uncertainty summaries while remaining fail-closed.
+- `tests/test_rl_evidence.py`: verifies the envelope includes bootstrap intervals and probability-of-improvement fields without exposing executable trading instructions.
 
 ## Verification
 
@@ -28,7 +32,7 @@ After adding the RL evidence envelope, the repository-owned test suite passed:
 
 ```text
 python -m pytest tests -q
-185 passed, 1 warning, 17 subtests passed
+195 passed, 1 warning, 17 subtests passed
 ```
 
 The warning came from `pandas_ta`/Pandas compatibility and did not affect the checked invariants.
@@ -94,12 +98,25 @@ Simple same-window baselines, compounded from processed `log_return_1h` after th
 | ETH buy-and-hold | -25.52% | -0.1803 | -65.28% |
 | 50/50 hourly rebalanced before costs | 7.43% | 0.0544 | -56.91% |
 
+Same-path circular block-bootstrap uncertainty artifact:
+
+| Bootstrap diagnostic | Value |
+| --- | ---: |
+| Strategy total-return 95% interval | -6.97% to 25.30% |
+| Strategy Sharpe 95% interval | -0.7905 to 1.1010 |
+| Strategy max-drawdown 95% interval | -14.12% to 0.00% |
+| Probability of beating cash on total return | 55.8% |
+| Probability of beating BTC buy-and-hold on total return | 30.8% |
+| Probability of beating ETH buy-and-hold on total return | 63.2% |
+| Probability of beating 50/50 hourly rebalanced on total return | 48.0% |
+
 Interpretation:
 
 - The challenger dramatically reduces drawdown versus raw crypto exposure.
 - It trails the simple 50/50 total return and Sharpe, but with much lower drawdown.
 - It trails BTC buy-and-hold return and Sharpe, while using far less market exposure.
 - The final episode state is 100% cash after risk exit/reentry lock, so the apparent stability comes partly from governance rather than pure alpha.
+- The bootstrap report is useful as a same-path uncertainty check, but it is not promotion evidence by itself; the total-return interval crosses zero and the model is not more likely than not to beat the simple 50/50 baseline on total return.
 
 ## Reliability Status
 
@@ -113,7 +130,10 @@ Implemented after the backtest:
 - generated today's envelope at `../../../results/daily/2026-07-21/corrected_clock_model_1/rl_evidence.json`.
 - added automatic backtest reliability artifacts for simple baselines and reproducibility provenance;
 - added an append-only daily trial registry for backtest comparisons;
+- added a partial statistical uncertainty artifact with circular block-bootstrap intervals and baseline probability-of-improvement estimates;
 - generated the current run's `../../../results/daily/2026-07-21/2/backtest_baselines.csv`, `../../../results/daily/2026-07-21/2/backtest_provenance.json`, and `../../../results/daily/2026-07-21/backtest_trial_registry.csv` without rerunning the model.
+- backfilled `../../../results/daily/2026-07-21/2/backtest_statistical_report.json` for the corrected-clock evaluation episode.
+- regenerated `../../../results/daily/2026-07-21/corrected_clock_model_1/rl_evidence.json` with the bootstrap uncertainty summary included. It still reports `ABSTAIN`.
 
 Today's envelope status is `ABSTAIN`, with reasons: missing promotion status, promotion expiry, full causal-integrity gate, statistical gates, calibration gate, and prospective shadow gate.
 
@@ -122,7 +142,7 @@ Remaining gates before LLM agents should cite or act on RL output:
 - randomized or rolling validation windows instead of duplicate deterministic eval episodes;
 - multi-seed training and variance reporting;
 - purged/embargoed walk-forward evaluation;
-- bootstrap confidence intervals, DSR/PSR/PBO style overfit diagnostics, and cost/slippage sensitivity;
+- DSR/PSR/PBO style overfit diagnostics and cost/slippage sensitivity beyond the same-path bootstrap artifact;
 - an explicit typed evidence envelope for LLM agents, including horizon, calibration, confidence, uncertainty, drawdown state, and "do not act" flags;
 - quarantine of pre-fix leaked checkpoints from any agent-facing source.
 
@@ -134,6 +154,7 @@ Remaining gates before LLM agents should cite or act on RL output:
 - Backtest metrics: `../../../results/daily/2026-07-21/2/backtest_metrics.csv`
 - Backtest baselines: `../../../results/daily/2026-07-21/2/backtest_baselines.csv`
 - Backtest provenance: `../../../results/daily/2026-07-21/2/backtest_provenance.json`
+- Backtest statistical report: `../../../results/daily/2026-07-21/2/backtest_statistical_report.json`
 - Trial registry: `../../../results/daily/2026-07-21/backtest_trial_registry.csv`
 - Episode parquet: `../../../results/daily/2026-07-21/2/backtest_episode_rl_only_live_like_dynamic_weighted.parquet`
 - Trade decisions: `../../../results/daily/2026-07-21/2/trade_decisions_rl_only_live_like_dynamic_weighted.csv`

@@ -723,6 +723,287 @@ def write_backtest_reliability_artifacts(
     return provenance
 
 
+def _finite_or_none(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if np.isfinite(numeric) else None
+
+
+def _percentile_interval(values: list[float] | np.ndarray) -> dict[str, float | None]:
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return {"p2_5": None, "median": None, "p97_5": None}
+    p2_5, median, p97_5 = np.percentile(finite, [2.5, 50.0, 97.5])
+    return {
+        "p2_5": float(p2_5),
+        "median": float(median),
+        "p97_5": float(p97_5),
+    }
+
+
+def _nav_to_simple_returns(nav: pd.Series, *, initial_capital: float) -> pd.Series:
+    clean_nav = pd.Series(nav).astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    clean_nav = clean_nav[clean_nav > 0.0]
+    if clean_nav.empty:
+        return pd.Series(dtype=float)
+
+    returns = clean_nav.pct_change()
+    returns.iloc[0] = clean_nav.iloc[0] / max(float(initial_capital), 1e-12) - 1.0
+    returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
+    return returns.astype(float)
+
+
+def _metrics_from_simple_returns(
+    simple_returns: pd.Series | np.ndarray,
+    *,
+    initial_capital: float,
+    periods_per_year: int = 8760,
+) -> dict[str, float]:
+    returns = np.asarray(simple_returns, dtype=np.float64)
+    returns = returns[np.isfinite(returns)]
+    if returns.size == 0:
+        return {
+            "total_return_pct": 0.0,
+            "sharpe_ratio": 0.0,
+            "max_drawdown_pct": 0.0,
+        }
+
+    clipped_returns = np.clip(returns, -0.999999, None)
+    log_returns = np.log1p(clipped_returns)
+    growth = np.exp(np.cumsum(log_returns))
+    nav = np.concatenate([[float(initial_capital)], growth * float(initial_capital)])
+    running_peak = np.maximum.accumulate(nav)
+    drawdowns = nav / np.maximum(running_peak, 1e-12) - 1.0
+    std = float(np.std(log_returns, ddof=1)) if log_returns.size > 1 else 0.0
+    sharpe = float(np.mean(log_returns) / std * np.sqrt(periods_per_year)) if std > 0.0 else 0.0
+    return {
+        "total_return_pct": float((growth[-1] - 1.0) * 100.0),
+        "sharpe_ratio": sharpe,
+        "max_drawdown_pct": float(np.min(drawdowns) * 100.0),
+    }
+
+
+def _circular_block_indices(n_rows: int, rng: np.random.Generator, block_size: int) -> np.ndarray:
+    if n_rows <= 0:
+        return np.asarray([], dtype=int)
+
+    effective_block_size = max(1, min(int(block_size), int(n_rows)))
+    chunks: list[np.ndarray] = []
+    sampled_rows = 0
+    while sampled_rows < n_rows:
+        start = int(rng.integers(0, n_rows))
+        chunk = (start + np.arange(effective_block_size)) % n_rows
+        chunks.append(chunk)
+        sampled_rows += effective_block_size
+    return np.concatenate(chunks)[:n_rows]
+
+
+def _bootstrap_metric_samples(
+    returns: pd.Series | np.ndarray,
+    *,
+    initial_capital: float,
+    n_bootstrap: int,
+    block_size: int,
+    seed: int,
+) -> dict[str, list[float]]:
+    metric_samples: dict[str, list[float]] = {
+        "total_return_pct": [],
+        "sharpe_ratio": [],
+        "max_drawdown_pct": [],
+    }
+    returns_array = np.asarray(returns, dtype=np.float64)
+    returns_array = returns_array[np.isfinite(returns_array)]
+    if returns_array.size == 0 or n_bootstrap <= 0:
+        return metric_samples
+
+    rng = np.random.default_rng(int(seed))
+    for _ in range(int(n_bootstrap)):
+        indices = _circular_block_indices(len(returns_array), rng, block_size)
+        sample_metrics = _metrics_from_simple_returns(
+            returns_array[indices],
+            initial_capital=initial_capital,
+        )
+        for metric_name in metric_samples:
+            metric_samples[metric_name].append(sample_metrics[metric_name])
+    return metric_samples
+
+
+def build_block_bootstrap_statistical_report(
+    *,
+    episode_df: pd.DataFrame,
+    baseline_navs: dict[str, pd.Series],
+    initial_capital: float,
+    seed: int = 42,
+    n_bootstrap: int = 500,
+    block_size: int = 24 * 7,
+) -> dict[str, Any]:
+    """Estimate same-path uncertainty for a backtest using circular block bootstrap."""
+    if "portfolio_value" not in episode_df.columns:
+        raise ValueError("episode_df must contain a portfolio_value column")
+
+    n_bootstrap = max(0, int(n_bootstrap))
+    block_size = max(1, int(block_size))
+    strategy_returns = _nav_to_simple_returns(
+        episode_df["portfolio_value"],
+        initial_capital=initial_capital,
+    )
+    observed_strategy = _metrics_from_simple_returns(
+        strategy_returns,
+        initial_capital=initial_capital,
+    )
+    strategy_samples = _bootstrap_metric_samples(
+        strategy_returns,
+        initial_capital=initial_capital,
+        n_bootstrap=n_bootstrap,
+        block_size=block_size,
+        seed=seed,
+    )
+
+    baseline_reports: dict[str, Any] = {}
+    for baseline_idx, (baseline_name, baseline_nav) in enumerate(baseline_navs.items(), start=1):
+        baseline_returns = _nav_to_simple_returns(
+            baseline_nav,
+            initial_capital=initial_capital,
+        )
+        aligned = pd.concat(
+            {"strategy": strategy_returns, "baseline": baseline_returns},
+            axis=1,
+        ).dropna()
+        if aligned.empty:
+            baseline_reports[baseline_name] = {
+                "rows": 0,
+                "observed_baseline": None,
+                "observed_delta_strategy_minus_baseline": None,
+                "probability_strategy_beats_baseline": None,
+                "bootstrap_delta_ci": None,
+            }
+            continue
+
+        strategy_array = aligned["strategy"].to_numpy(dtype=np.float64)
+        baseline_array = aligned["baseline"].to_numpy(dtype=np.float64)
+        observed_aligned_strategy = _metrics_from_simple_returns(
+            strategy_array,
+            initial_capital=initial_capital,
+        )
+        observed_baseline = _metrics_from_simple_returns(
+            baseline_array,
+            initial_capital=initial_capital,
+        )
+
+        wins = {
+            "total_return_pct": 0,
+            "sharpe_ratio": 0,
+            "max_drawdown_pct": 0,
+        }
+        deltas: dict[str, list[float]] = {
+            "total_return_pct": [],
+            "sharpe_ratio": [],
+            "max_drawdown_pct": [],
+        }
+        rng = np.random.default_rng(int(seed) + baseline_idx)
+        for _ in range(n_bootstrap):
+            indices = _circular_block_indices(len(aligned), rng, block_size)
+            strategy_metrics = _metrics_from_simple_returns(
+                strategy_array[indices],
+                initial_capital=initial_capital,
+            )
+            baseline_metrics = _metrics_from_simple_returns(
+                baseline_array[indices],
+                initial_capital=initial_capital,
+            )
+            for metric_name in wins:
+                delta = strategy_metrics[metric_name] - baseline_metrics[metric_name]
+                deltas[metric_name].append(delta)
+                if delta > 0.0:
+                    wins[metric_name] += 1
+
+        denominator = max(1, n_bootstrap)
+        baseline_reports[baseline_name] = {
+            "rows": int(len(aligned)),
+            "observed_baseline": {
+                metric_name: _finite_or_none(observed_baseline[metric_name])
+                for metric_name in observed_baseline
+            },
+            "observed_delta_strategy_minus_baseline": {
+                metric_name: _finite_or_none(
+                    observed_aligned_strategy[metric_name] - observed_baseline[metric_name]
+                )
+                for metric_name in observed_aligned_strategy
+            },
+            "probability_strategy_beats_baseline": {
+                metric_name: float(wins[metric_name] / denominator) if n_bootstrap > 0 else None
+                for metric_name in wins
+            },
+            "bootstrap_delta_ci": {
+                metric_name: _percentile_interval(values)
+                for metric_name, values in deltas.items()
+            },
+        }
+
+    return {
+        "created_at": datetime.now().isoformat(),
+        "method": "circular_block_bootstrap",
+        "purpose": "Estimate same-path uncertainty for a single backtest and compare it with simple baselines.",
+        "parameters": {
+            "seed": int(seed),
+            "n_bootstrap": int(n_bootstrap),
+            "block_size": int(block_size),
+            "periods_per_year": 8760,
+        },
+        "sample": {
+            "episode_rows": int(len(episode_df)),
+            "strategy_return_rows": int(len(strategy_returns)),
+            "effective_block_size": int(min(block_size, max(1, len(strategy_returns)))) if len(strategy_returns) else 0,
+        },
+        "strategy": {
+            "observed": {
+                metric_name: _finite_or_none(metric_value)
+                for metric_name, metric_value in observed_strategy.items()
+            },
+            "bootstrap_ci": {
+                metric_name: _percentile_interval(values)
+                for metric_name, values in strategy_samples.items()
+            },
+        },
+        "baselines": baseline_reports,
+        "gate_status": {
+            "statistical_uncertainty": "partial",
+            "promotion_ready": False,
+            "reason": "Same-path bootstrap intervals are useful diagnostics but do not replace rolling-window, multi-seed, prospective shadow evidence.",
+        },
+        "caveats": [
+            "This resamples one observed historical path, so it cannot prove robustness to unseen regimes.",
+            "Circular blocks preserve some serial dependence, but interval quality depends on block-size choice.",
+            "Promotion still requires causal audit, rolling/time-split validation, calibration, and prospective shadow trading evidence.",
+        ],
+    }
+
+
+def write_backtest_statistical_report(
+    *,
+    episode_df: pd.DataFrame,
+    baseline_navs: dict[str, pd.Series],
+    output_dir: Path,
+    initial_capital: float,
+    seed: int = 42,
+    n_bootstrap: int = 500,
+    block_size: int = 24 * 7,
+) -> dict[str, Any]:
+    report = build_block_bootstrap_statistical_report(
+        episode_df=episode_df,
+        baseline_navs=baseline_navs,
+        initial_capital=initial_capital,
+        seed=seed,
+        n_bootstrap=n_bootstrap,
+        block_size=block_size,
+    )
+    write_json_artifact(Path(output_dir) / "backtest_statistical_report.json", report)
+    return report
+
+
 def append_backtest_trial_registry(
     *,
     session_dir: Path,
@@ -756,7 +1037,9 @@ def build_backtest_trial_registry_row(
     models = provenance.get("models", {}) if isinstance(provenance, dict) else {}
     gates = {
         "causal_integrity": "partial",
-        "statistical_uncertainty": "missing",
+        "statistical_uncertainty": "bootstrap_partial"
+        if meta.get("statistical_uncertainty_report_path")
+        else "missing",
         "calibration": "missing",
         "prospective_shadow": "missing",
         "promotion_status": "not_promoted",
@@ -771,6 +1054,7 @@ def build_backtest_trial_registry_row(
         "backtest_window": provenance.get("backtest_window", ""),
         "initial_capital": meta.get("initial_capital", ""),
         "model_dir": meta.get("model_dir", provenance.get("model_dir", "")),
+        "statistical_uncertainty_report_path": meta.get("statistical_uncertainty_report_path", ""),
         "code_commit": _current_git_commit(),
         "code_dirty": _git_worktree_dirty(),
         "feature_schema_sha256": provenance.get("feature_schema_sha256", ""),
@@ -1790,6 +2074,14 @@ def main() -> None:
     )
     metrics.update(compute_trade_metrics(episode_df))
     _print_metrics(f"{args.pipeline}/{args.realism_profile}", metrics)
+    statistical_report = write_backtest_statistical_report(
+        episode_df=episode_df,
+        baseline_navs=build_baseline_navs(test_data, initial_capital=args.initial_capital, warmup_steps=LOOKBACK_WINDOW),
+        output_dir=session_dir,
+        initial_capital=args.initial_capital,
+    )
+    meta["statistical_uncertainty_report_path"] = str(session_dir / "backtest_statistical_report.json")
+    meta["statistical_uncertainty_method"] = statistical_report["method"]
     append_backtest_trial_registry(
         session_dir=session_dir,
         run_label=f"{args.pipeline}_{args.realism_profile}_{args.method}",

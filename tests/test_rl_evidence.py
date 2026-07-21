@@ -86,6 +86,51 @@ class RLEvidenceTest(unittest.TestCase):
             self.assertNotIn("target_weights", evidence["metrics"])
             self.assertTrue(out_path.exists())
 
+    def test_build_from_backtest_includes_safe_statistical_uncertainty_summary(self):
+        with TemporaryDirectory() as tmp_name:
+            base = Path(tmp_name)
+            metrics_path = base / "backtest_metrics.csv"
+            statistical_path = base / "backtest_statistical_report.json"
+            metrics_path.write_text(",value\nsharpe_ratio,0.25\n", encoding="utf-8")
+            statistical_path.write_text(
+                json.dumps(
+                    {
+                        "method": "circular_block_bootstrap",
+                        "strategy": {
+                            "bootstrap_ci": {
+                                "total_return_pct": {"p2_5": -1.0, "median": 2.0, "p97_5": 5.0},
+                                "sharpe_ratio": {"p2_5": -0.5, "median": 0.2, "p97_5": 0.8},
+                            }
+                        },
+                        "baselines": {
+                            "cash": {
+                                "probability_strategy_beats_baseline": {
+                                    "total_return_pct": 0.56,
+                                    "sharpe_ratio": 0.54,
+                                }
+                            }
+                        },
+                        "gate_status": {"statistical_uncertainty": "partial"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            evidence = build_evidence_from_backtest(
+                metrics_path=metrics_path,
+                statistical_report_path=statistical_path,
+                now=datetime(2026, 7, 21, tzinfo=timezone.utc),
+            )
+
+        self.assertTrue(evidence["uncertainty"]["bootstrap_interval_available"])
+        self.assertTrue(evidence["uncertainty"]["probability_of_improvement_available"])
+        self.assertEqual(evidence["uncertainty"]["strategy_ci"]["total_return_pct"]["median"], 2.0)
+        self.assertEqual(
+            evidence["uncertainty"]["probability_strategy_beats_baseline"]["cash"]["total_return_pct"],
+            0.56,
+        )
+        self.assertIn("statistical_report_sha256", evidence["provenance"])
+
     def test_build_from_backtest_can_emit_verified_when_all_gates_pass(self):
         with TemporaryDirectory() as tmp_name:
             base = Path(tmp_name)

@@ -9,6 +9,7 @@ from backtest import (
     TRADE_PROFILES,
     append_backtest_trial_registry,
     apply_trade_profile_overrides,
+    build_block_bootstrap_statistical_report,
     build_backtest_provenance,
     build_arg_parser,
     build_backtest_trial_registry_row,
@@ -21,6 +22,7 @@ from backtest import (
     maybe_save_best_model_snapshot,
     resolve_backtest_model_dir,
     write_backtest_reliability_artifacts,
+    write_backtest_statistical_report,
     write_trade_decision_log,
 )
 
@@ -218,6 +220,67 @@ class BacktestSessionOutputsTest(unittest.TestCase):
 
         self.assertEqual(registry["run_label"].tolist(), ["first", "second"])
         self.assertEqual(registry["total_return_pct"].tolist(), [1.0, 2.0])
+
+    def test_block_bootstrap_statistical_report_contains_intervals_and_baseline_odds(self):
+        idx = pd.date_range("2026-01-01", periods=6, freq="h", tz="UTC")
+        episode = pd.DataFrame({"portfolio_value": [100.0, 101.0, 100.5, 102.0, 103.0, 102.5]}, index=idx)
+        baselines = {
+            "cash": pd.Series([100.0] * len(idx), index=idx),
+            "buy_and_hold": pd.Series([100.0, 100.4, 100.6, 101.0, 100.8, 101.2], index=idx),
+        }
+
+        report = build_block_bootstrap_statistical_report(
+            episode_df=episode,
+            baseline_navs=baselines,
+            initial_capital=100.0,
+            seed=7,
+            n_bootstrap=50,
+            block_size=2,
+        )
+
+        self.assertEqual(report["method"], "circular_block_bootstrap")
+        self.assertEqual(report["parameters"]["n_bootstrap"], 50)
+        self.assertIn("p2_5", report["strategy"]["bootstrap_ci"]["total_return_pct"])
+        self.assertIn("cash", report["baselines"])
+        self.assertIn(
+            "total_return_pct",
+            report["baselines"]["cash"]["probability_strategy_beats_baseline"],
+        )
+        self.assertEqual(report["gate_status"]["statistical_uncertainty"], "partial")
+
+    def test_block_bootstrap_statistical_report_handles_block_larger_than_series(self):
+        idx = pd.date_range("2026-01-01", periods=2, freq="h", tz="UTC")
+        episode = pd.DataFrame({"portfolio_value": [100.0, 100.5]}, index=idx)
+
+        report = build_block_bootstrap_statistical_report(
+            episode_df=episode,
+            baseline_navs={"cash": pd.Series([100.0, 100.0], index=idx)},
+            initial_capital=100.0,
+            n_bootstrap=10,
+            block_size=99,
+        )
+
+        self.assertEqual(report["sample"]["effective_block_size"], 2)
+        self.assertIsNotNone(report["strategy"]["bootstrap_ci"]["total_return_pct"]["median"])
+
+    def test_write_backtest_statistical_report_outputs_json(self):
+        idx = pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC")
+        episode = pd.DataFrame({"portfolio_value": [100.0, 101.0, 102.0]}, index=idx)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            write_backtest_statistical_report(
+                episode_df=episode,
+                baseline_navs={"cash": pd.Series([100.0, 100.0, 100.0], index=idx)},
+                output_dir=out,
+                initial_capital=100.0,
+                n_bootstrap=10,
+                block_size=2,
+            )
+
+            payload = (out / "backtest_statistical_report.json").read_text(encoding="utf-8")
+
+        self.assertIn("circular_block_bootstrap", payload)
+        self.assertIn("probability_strategy_beats_baseline", payload)
 
     def test_create_backtest_session_dir_uses_daily_incrementing_number(self):
         with tempfile.TemporaryDirectory() as tmp:

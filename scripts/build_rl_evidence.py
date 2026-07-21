@@ -17,6 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build fail-closed RL evidence for analyst LLM context.")
     parser.add_argument("--metrics-path", type=Path, required=True)
     parser.add_argument("--metadata-path", type=Path, default=None)
+    parser.add_argument("--statistical-report-path", type=Path, default=None)
     parser.add_argument("--output-path", type=Path, required=True)
     parser.add_argument("--horizon", default="research_backtest")
     parser.add_argument("--promoted", action="store_true")
@@ -33,6 +34,7 @@ def main() -> None:
     envelope = build_evidence_from_backtest(
         metrics_path=args.metrics_path,
         metadata_path=args.metadata_path,
+        statistical_report_path=args.statistical_report_path,
         output_path=args.output_path,
         promoted=args.promoted,
         promotion_expires_utc=args.promotion_expires_utc,

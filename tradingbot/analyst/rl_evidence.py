@@ -129,6 +129,7 @@ def build_evidence_from_backtest(
     *,
     metrics_path: Path,
     metadata_path: Path | None = None,
+    statistical_report_path: Path | None = None,
     output_path: Path | None = None,
     now: datetime | None = None,
     promoted: bool = False,
@@ -144,6 +145,7 @@ def build_evidence_from_backtest(
     metrics_file = Path(metrics_path)
     metrics = _read_metrics_csv(metrics_file)
     metadata = _read_json_file(metadata_path) if metadata_path else {}
+    statistical_report = _read_json_file(statistical_report_path) if statistical_report_path else {}
     reasons = _gate_reasons(
         promoted=promoted,
         promotion_expires_utc=promotion_expires_utc,
@@ -160,12 +162,16 @@ def build_evidence_from_backtest(
         else "RL evidence is withheld until promotion, statistical, calibration, and prospective gates pass."
     )
     provenance = {
-        "metrics_path": str(metrics_file),
-        "metrics_sha256": _sha256_file(metrics_file) if metrics_file.exists() else "",
-        "metadata": metadata,
-        "promotion_expires_utc": promotion_expires_utc,
-        "gates": {
-            "promoted": promoted,
+            "metrics_path": str(metrics_file),
+            "metrics_sha256": _sha256_file(metrics_file) if metrics_file.exists() else "",
+            "metadata": metadata,
+            "statistical_report_path": str(statistical_report_path) if statistical_report_path else "",
+            "statistical_report_sha256": _sha256_file(Path(statistical_report_path))
+            if statistical_report_path and Path(statistical_report_path).exists()
+            else "",
+            "promotion_expires_utc": promotion_expires_utc,
+            "gates": {
+                "promoted": promoted,
             "causal_integrity_passed": causal_integrity_passed,
             "statistical_gates_passed": statistical_gates_passed,
             "calibration_passed": calibration_passed,
@@ -179,12 +185,7 @@ def build_evidence_from_backtest(
         summary=summary,
         reasons=reasons,
         metrics=_public_metrics(metrics),
-        uncertainty={
-            "bootstrap_interval_available": False,
-            "pbo_available": False,
-            "dsr_available": False,
-            "probability_of_improvement_available": False,
-        },
+        uncertainty=_public_uncertainty(statistical_report),
         calibration={
             "conformal_interval_available": False,
             "trailing_coverage_available": False,
@@ -272,6 +273,50 @@ def _public_metrics(metrics: dict[str, float | str | None]) -> dict[str, float |
         "trade_count",
     }
     return {key: metrics.get(key) for key in sorted(allowed) if key in metrics}
+
+
+def _public_uncertainty(statistical_report: dict[str, Any]) -> dict[str, Any]:
+    uncertainty: dict[str, Any] = {
+        "bootstrap_interval_available": False,
+        "pbo_available": False,
+        "dsr_available": False,
+        "probability_of_improvement_available": False,
+    }
+    if not statistical_report:
+        return uncertainty
+
+    strategy = statistical_report.get("strategy", {})
+    baselines = statistical_report.get("baselines", {})
+    strategy_ci = strategy.get("bootstrap_ci", {}) if isinstance(strategy, dict) else {}
+    probability_by_baseline: dict[str, Any] = {}
+    if isinstance(baselines, dict):
+        for baseline_name, details in baselines.items():
+            if not isinstance(details, dict):
+                continue
+            probabilities = details.get("probability_strategy_beats_baseline")
+            if isinstance(probabilities, dict):
+                probability_by_baseline[str(baseline_name)] = {
+                    metric_name: probabilities.get(metric_name)
+                    for metric_name in ("total_return_pct", "sharpe_ratio", "max_drawdown_pct")
+                    if metric_name in probabilities
+                }
+
+    uncertainty.update(
+        {
+            "bootstrap_interval_available": bool(strategy_ci),
+            "probability_of_improvement_available": bool(probability_by_baseline),
+            "method": statistical_report.get("method", ""),
+            "gate_status": statistical_report.get("gate_status", {}),
+            "strategy_ci": {
+                metric_name: strategy_ci.get(metric_name)
+                for metric_name in ("total_return_pct", "sharpe_ratio", "max_drawdown_pct")
+                if metric_name in strategy_ci
+            },
+            "probability_strategy_beats_baseline": probability_by_baseline,
+            "caveat": "Same-path bootstrap diagnostics are informational and do not make RL agent-trustworthy without the remaining promotion gates.",
+        }
+    )
+    return uncertainty
 
 
 def _parse_scalar(value: Any) -> float | str | None:
