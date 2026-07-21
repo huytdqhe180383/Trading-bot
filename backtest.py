@@ -170,6 +170,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--pipeline", default="rl_full", choices=list(PIPELINES.keys()))
     parser.add_argument("--realism-profile", default="live_like", choices=list(REALISM.keys()))
+    parser.add_argument("--fee-override", type=float, default=None, help="Override the selected realism profile fee.")
+    parser.add_argument("--slippage-override", type=float, default=None, help="Override the selected realism profile slippage.")
+    parser.add_argument(
+        "--latency-steps-override",
+        type=int,
+        default=None,
+        help="Override the selected realism profile latency steps.",
+    )
     parser.add_argument("--run-matrix", action="store_true", help="Run all ablation pipelines for the selected realism profile.")
     parser.add_argument("--diagnose-realism", action="store_true", help="Run RL-only baseline and live_like profiles and save realism report.")
     parser.add_argument(
@@ -252,6 +260,24 @@ def apply_execution_control_overrides(args: argparse.Namespace) -> None:
     trading_env_module.POSITION_RESET_WEIGHT_THRESHOLD = float(args.position_reset_weight_threshold)
     trading_env_module.POSITION_RESET_PERSIST_BARS = int(args.position_reset_persist_bars)
     trading_env_module.POSITION_CAP_MODE = str(args.position_cap_mode)
+
+
+def apply_realism_overrides(args: argparse.Namespace) -> None:
+    """Apply explicit cost/latency overrides to the selected realism profile."""
+    profile = dict(REALISM[str(args.realism_profile)])
+    if args.fee_override is not None:
+        if args.fee_override < 0:
+            raise ValueError("--fee-override must be non-negative")
+        profile["fee"] = float(args.fee_override)
+    if args.slippage_override is not None:
+        if args.slippage_override < 0:
+            raise ValueError("--slippage-override must be non-negative")
+        profile["slippage"] = float(args.slippage_override)
+    if args.latency_steps_override is not None:
+        if args.latency_steps_override < 0:
+            raise ValueError("--latency-steps-override must be non-negative")
+        profile["latency_steps"] = int(args.latency_steps_override)
+    REALISM[str(args.realism_profile)] = profile
 
 
 def _apply_named_post_policy_overlay(
@@ -1879,6 +1905,7 @@ def main() -> None:
     args = parser.parse_args()
     args.model_dir = resolve_backtest_model_dir(args.model_dir)
     apply_trade_profile_overrides(args)
+    apply_realism_overrides(args)
     apply_execution_control_overrides(args)
 
     test_data = load_test_data(args.backtest_window)
@@ -1893,6 +1920,10 @@ def main() -> None:
             "method": args.method,
             "comparison_methods": args.comparison_methods,
             "realism_profile": args.realism_profile,
+            "realism": REALISM[args.realism_profile],
+            "fee_override": args.fee_override,
+            "slippage_override": args.slippage_override,
+            "latency_steps_override": args.latency_steps_override,
             "run_matrix": args.run_matrix,
             "diagnose_realism": args.diagnose_realism,
             "compare_ensemble_methods": args.compare_ensemble_methods,

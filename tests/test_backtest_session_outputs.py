@@ -6,8 +6,10 @@ from pathlib import Path
 import pandas as pd
 
 from backtest import (
+    REALISM,
     TRADE_PROFILES,
     append_backtest_trial_registry,
+    apply_realism_overrides,
     apply_trade_profile_overrides,
     build_block_bootstrap_statistical_report,
     build_backtest_provenance,
@@ -35,6 +37,26 @@ class BacktestSessionOutputsTest(unittest.TestCase):
 
         self.assertEqual(args.initial_capital, 100.0)
 
+    def test_build_arg_parser_accepts_realism_cost_overrides(self):
+        parser = build_arg_parser()
+
+        args = parser.parse_args(
+            [
+                "--realism-profile",
+                "live_like",
+                "--fee-override",
+                "0.004",
+                "--slippage-override",
+                "0.005",
+                "--latency-steps-override",
+                "3",
+            ]
+        )
+
+        self.assertEqual(args.fee_override, 0.004)
+        self.assertEqual(args.slippage_override, 0.005)
+        self.assertEqual(args.latency_steps_override, 3)
+
     def test_build_arg_parser_accepts_trade_profile_and_position_cap_mode(self):
         parser = build_arg_parser()
 
@@ -60,6 +82,33 @@ class BacktestSessionOutputsTest(unittest.TestCase):
         self.assertEqual(args.rebalance_threshold_stress, TRADE_PROFILES["moderate"]["rebalance_threshold_stress"])
         self.assertEqual(args.rebalance_threshold_crisis, TRADE_PROFILES["moderate"]["rebalance_threshold_crisis"])
         self.assertEqual(args.material_trade_threshold, TRADE_PROFILES["moderate"]["material_trade_threshold"])
+
+    def test_apply_realism_overrides_updates_selected_profile_only(self):
+        parser = build_arg_parser()
+        args = parser.parse_args(
+            [
+                "--realism-profile",
+                "live_like",
+                "--fee-override",
+                "0.004",
+                "--slippage-override",
+                "0.005",
+                "--latency-steps-override",
+                "3",
+            ]
+        )
+        old_live_like = dict(REALISM["live_like"])
+        old_baseline = dict(REALISM["baseline"])
+        try:
+            apply_realism_overrides(args)
+
+            self.assertEqual(REALISM["live_like"]["fee"], 0.004)
+            self.assertEqual(REALISM["live_like"]["slippage"], 0.005)
+            self.assertEqual(REALISM["live_like"]["latency_steps"], 3)
+            self.assertEqual(REALISM["baseline"], old_baseline)
+        finally:
+            REALISM["live_like"] = old_live_like
+            REALISM["baseline"] = old_baseline
 
     def test_build_benchmark_nav_scales_with_initial_capital(self):
         idx = pd.date_range("2026-01-01", periods=3, freq="h", tz="UTC")

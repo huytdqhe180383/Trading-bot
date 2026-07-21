@@ -1,0 +1,77 @@
+import sys
+import tempfile
+import unittest
+from argparse import Namespace
+from pathlib import Path
+from unittest.mock import patch
+
+import pandas as pd
+
+from scripts import run_rl_cost_stress as runner
+
+
+class RLCostStressTest(unittest.TestCase):
+    def test_parse_model_specs_requires_label_and_path(self):
+        specs = runner.parse_model_specs(["seed_41=results/seed_41/models"])
+
+        self.assertEqual(specs[0].label, "seed_41")
+        self.assertEqual(specs[0].models_dir, Path("results/seed_41/models"))
+        with self.assertRaises(ValueError):
+            runner.parse_model_specs([])
+        with self.assertRaises(ValueError):
+            runner.parse_model_specs(["missing_separator"])
+
+    def test_parse_cost_profiles_requires_non_negative_values(self):
+        profiles = runner.parse_cost_profiles("base:0.001:0.002:1,stress:0.003:0.004:2")
+
+        self.assertEqual([profile.label for profile in profiles], ["base", "stress"])
+        self.assertEqual(profiles[0].fee, 0.001)
+        self.assertEqual(profiles[1].latency_steps, 2)
+        with self.assertRaises(ValueError):
+            runner.parse_cost_profiles("")
+        with self.assertRaises(ValueError):
+            runner.parse_cost_profiles("bad:0.001:0.002")
+        with self.assertRaises(ValueError):
+            runner.parse_cost_profiles("bad:-0.001:0.002:1")
+
+    def test_backtest_command_includes_cost_overrides(self):
+        profile = runner.CostProfile(label="stress", fee=0.003, slippage=0.004, latency_steps=2)
+
+        command = runner.build_backtest_command(models_dir=Path("models/seed_41"), profile=profile)
+
+        self.assertEqual(command[0], sys.executable)
+        self.assertIn("backtest.py", command)
+        self.assertIn("--fee-override", command)
+        self.assertIn("0.003", command)
+        self.assertIn("--slippage-override", command)
+        self.assertIn("0.004", command)
+        self.assertIn("--latency-steps-override", command)
+        self.assertIn("2", command)
+
+    def test_run_cost_stress_dry_run_writes_commands_and_summary(self):
+        with tempfile.TemporaryDirectory() as tmp_name:
+            out = Path(tmp_name) / "stress"
+            args = Namespace(
+                model=["seed_41=models/seed_41"],
+                profiles="base:0.001:0.002:1",
+                pipeline="rl_only",
+                realism_profile="live_like",
+                method="dynamic_weighted",
+                output_dir=out,
+                run_label="unit",
+                dry_run=True,
+            )
+            with patch.object(runner, "_current_git_commit", return_value="abc123"):
+                result = runner.run_cost_stress(args)
+
+            summary = pd.read_csv(result / "cost_stress_summary.csv")
+            stdout = (result / "seed_41" / "base" / "backtest_stdout.log").read_text(encoding="utf-8")
+
+        self.assertEqual(summary["model_label"].tolist(), ["seed_41"])
+        self.assertEqual(summary["cost_profile"].tolist(), ["base"])
+        self.assertIn("DRY RUN", stdout)
+        self.assertIn("--fee-override", stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
