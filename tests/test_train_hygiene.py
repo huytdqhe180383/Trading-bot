@@ -11,8 +11,10 @@ from train import (
     _resolve_tensorboard_log_dir,
     build_parser,
     build_post_training_backtest_command,
+    parse_validation_cost_profiles,
     summarize_validation_windows,
     split_train_validation,
+    validation_selection_score,
 )
 
 
@@ -63,6 +65,46 @@ class TrainHygieneTest(unittest.TestCase):
         args = build_parser().parse_args(["--validation-windows", "7"])
 
         self.assertEqual(args.validation_windows, 7)
+
+    def test_parse_validation_cost_profiles(self):
+        profiles = parse_validation_cost_profiles("nominal:0.0012:0.0018,stress2x:0.0024:0.0036")
+
+        self.assertEqual([profile.label for profile in profiles], ["nominal", "stress2x"])
+        self.assertEqual(profiles[0].fee, 0.0012)
+        self.assertEqual(profiles[1].slippage, 0.0036)
+
+        with self.assertRaises(Exception):
+            parse_validation_cost_profiles("bad:0.001")
+        with self.assertRaises(Exception):
+            parse_validation_cost_profiles("bad:-0.001:0.002")
+
+    def test_validation_selection_score_can_use_worst_profile_mean(self):
+        score = validation_selection_score(
+            profile_mean_rewards={"nominal": 10.0, "stress2x": -5.0},
+            all_rewards=[12.0, 8.0, -4.0, -6.0],
+            mode="worst_profile_mean",
+        )
+
+        self.assertEqual(score, -5.0)
+
+    def test_parser_accepts_cost_aware_validation_options(self):
+        args = build_parser().parse_args(
+            [
+                "--validation-cost-profiles",
+                "nominal:0.0012:0.0018,stress2x:0.0024:0.0036",
+                "--validation-score-mode",
+                "worst_profile_mean",
+                "--training-fee",
+                "0.0024",
+                "--training-slippage",
+                "0.0036",
+            ]
+        )
+
+        self.assertEqual(args.validation_score_mode, "worst_profile_mean")
+        self.assertEqual(args.validation_cost_profiles[1].label, "stress2x")
+        self.assertEqual(args.training_fee, 0.0024)
+        self.assertEqual(args.training_slippage, 0.0036)
 
     def test_post_training_backtest_defaults_to_dynamic_rl_only(self):
         args = build_parser().parse_args([])

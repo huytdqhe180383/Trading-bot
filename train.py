@@ -13,6 +13,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -32,12 +33,66 @@ from config import (
     ALGORITHMS, ALGO_KWARGS, TOTAL_TIMESTEPS, CHECKPOINT_FREQ,
     PROCESSED_DATA_DIR, MODELS_DIR, LOGS_DIR, SYMBOLS,
     TRAIN_DEVICE, REQUIRE_GPU_FOR_TRAINING, TRAIN_VALIDATION_FRACTION, TRAIN_SEED,
-    ENSEMBLE_METHOD, LOOKBACK_WINDOW,
+    ENSEMBLE_METHOD, LOOKBACK_WINDOW, BINANCE_SPOT_FEE, SLIPPAGE,
 )
 from environment.trading_env import SpotPortfolioEnv
 
 
 ALGO_CLS = {"PPO": PPO, "SAC": SAC}
+
+
+@dataclass(frozen=True)
+class ValidationCostProfile:
+    label: str
+    fee: float
+    slippage: float
+
+
+def parse_validation_cost_profiles(raw: str | None) -> list[ValidationCostProfile]:
+    """Parse label:fee:slippage validation-cost profiles."""
+    if raw is None or str(raw).strip() == "":
+        return [ValidationCostProfile("env_default", float(BINANCE_SPOT_FEE), float(SLIPPAGE))]
+
+    profiles: list[ValidationCostProfile] = []
+    for part in str(raw).split(","):
+        text = part.strip()
+        if not text:
+            continue
+        pieces = [piece.strip() for piece in text.split(":")]
+        if len(pieces) != 3:
+            raise argparse.ArgumentTypeError(
+                f"Invalid validation cost profile {text!r}; expected label:fee:slippage."
+            )
+        label, fee_raw, slippage_raw = pieces
+        if not label:
+            raise argparse.ArgumentTypeError(f"Invalid validation cost profile {text!r}; label is empty.")
+        fee = float(fee_raw)
+        slippage = float(slippage_raw)
+        if fee < 0 or slippage < 0:
+            raise argparse.ArgumentTypeError(
+                f"Invalid validation cost profile {text!r}; fee and slippage must be non-negative."
+            )
+        profiles.append(ValidationCostProfile(label=label, fee=fee, slippage=slippage))
+    if not profiles:
+        raise argparse.ArgumentTypeError("At least one validation cost profile is required.")
+    return profiles
+
+
+def validation_selection_score(
+    *,
+    profile_mean_rewards: dict[str, float],
+    all_rewards: list[float],
+    mode: str,
+) -> float:
+    if not all_rewards:
+        return -float("inf")
+    if mode == "mean_reward":
+        return float(np.mean(all_rewards))
+    if mode == "worst_profile_mean":
+        return float(min(profile_mean_rewards.values())) if profile_mean_rewards else -float("inf")
+    if mode == "mean_minus_std":
+        return float(np.mean(all_rewards) - np.std(all_rewards, ddof=0))
+    raise ValueError(f"Unknown validation score mode: {mode}")
 
 
 def load_data(split: str = "train") -> dict[str, pd.DataFrame]:
@@ -120,6 +175,8 @@ class RollingValidationCallback(BaseCallback):
         best_model_save_path: str | Path,
         algo: str,
         eval_freq: int,
+        cost_profiles: list[ValidationCostProfile] | None = None,
+        score_mode: str = "mean_reward",
         deterministic: bool = True,
         max_no_improvement_evals: int = 10,
         min_evals: int = 20,
@@ -130,10 +187,13 @@ class RollingValidationCallback(BaseCallback):
         self.best_model_save_path = Path(best_model_save_path)
         self.algo = algo
         self.eval_freq = max(1, int(eval_freq))
+        self.cost_profiles = cost_profiles or parse_validation_cost_profiles(None)
+        self.score_mode = str(score_mode)
         self.deterministic = deterministic
         self.max_no_improvement_evals = int(max_no_improvement_evals)
         self.min_evals = int(min_evals)
         self.best_mean_reward = -float("inf")
+        self.best_selection_score = -float("inf")
         self.no_improvement_evals = 0
         self.eval_count = 0
         self.evaluation_rows: list[dict[str, float | int | str]] = []
@@ -145,53 +205,76 @@ class RollingValidationCallback(BaseCallback):
             return True
 
         window_rewards: list[float] = []
-        window_lengths: list[int] = []
-        for window_idx, window_data in enumerate(self.validation_windows, start=1):
-            env = Monitor(SpotPortfolioEnv(window_data, mode="eval"))
-            try:
-                rewards, lengths = evaluate_policy(
-                    self.model,
-                    env,
-                    n_eval_episodes=1,
-                    deterministic=self.deterministic,
-                    return_episode_rewards=True,
-                    warn=False,
+        profile_rewards: dict[str, list[float]] = {profile.label: [] for profile in self.cost_profiles}
+        for profile in self.cost_profiles:
+            for window_idx, window_data in enumerate(self.validation_windows, start=1):
+                env = Monitor(
+                    SpotPortfolioEnv(
+                        window_data,
+                        mode="eval",
+                        trading_fee=profile.fee,
+                        slippage=profile.slippage,
+                    )
                 )
-            finally:
-                env.close()
-            reward = float(rewards[0]) if rewards else 0.0
-            length = int(lengths[0]) if lengths else 0
-            window_rewards.append(reward)
-            window_lengths.append(length)
-            self.evaluation_rows.append(
-                {
-                    "timesteps": int(self.num_timesteps),
-                    "eval_count": int(self.eval_count + 1),
-                    "window": int(window_idx),
-                    "reward": reward,
-                    "length": length,
-                }
-            )
+                try:
+                    rewards, lengths = evaluate_policy(
+                        self.model,
+                        env,
+                        n_eval_episodes=1,
+                        deterministic=self.deterministic,
+                        return_episode_rewards=True,
+                        warn=False,
+                    )
+                finally:
+                    env.close()
+                reward = float(rewards[0]) if rewards else 0.0
+                length = int(lengths[0]) if lengths else 0
+                window_rewards.append(reward)
+                profile_rewards[profile.label].append(reward)
+                self.evaluation_rows.append(
+                    {
+                        "timesteps": int(self.num_timesteps),
+                        "eval_count": int(self.eval_count + 1),
+                        "cost_profile": profile.label,
+                        "fee": float(profile.fee),
+                        "slippage": float(profile.slippage),
+                        "window": int(window_idx),
+                        "reward": reward,
+                        "length": length,
+                    }
+                )
 
         mean_reward = float(np.mean(window_rewards))
         std_reward = float(np.std(window_rewards, ddof=0))
+        profile_mean_rewards = {
+            label: float(np.mean(rewards)) for label, rewards in profile_rewards.items() if rewards
+        }
+        selection_score = validation_selection_score(
+            profile_mean_rewards=profile_mean_rewards,
+            all_rewards=window_rewards,
+            mode=self.score_mode,
+        )
         self.eval_count += 1
         if self.verbose:
+            profile_text = ", ".join(f"{label}={value:.2f}" for label, value in profile_mean_rewards.items())
             logger.info(
                 f"{self.algo} rolling validation | steps={self.num_timesteps:,} "
                 f"mean_reward={mean_reward:.2f} +/- {std_reward:.2f} "
-                f"windows={len(window_rewards)}"
+                f"selection_score={selection_score:.2f} mode={self.score_mode} "
+                f"windows={len(self.validation_windows)} profiles=[{profile_text}]"
             )
 
-        if mean_reward > self.best_mean_reward:
+        if selection_score > self.best_selection_score:
             self.best_mean_reward = mean_reward
+            self.best_selection_score = selection_score
             self.no_improvement_evals = 0
             self.best_model_save_path.mkdir(parents=True, exist_ok=True)
             self.model.save(str(self.best_model_save_path / "best_model.zip"))
             if self.verbose:
                 logger.success(
-                    f"New best {self.algo} rolling-validation mean reward: "
-                    f"{mean_reward:.2f} -> {self.best_model_save_path / 'best_model.zip'}"
+                    f"New best {self.algo} rolling-validation score: "
+                    f"{selection_score:.2f} (mean_reward={mean_reward:.2f}) "
+                    f"-> {self.best_model_save_path / 'best_model.zip'}"
                 )
         else:
             self.no_improvement_evals += 1
@@ -307,6 +390,10 @@ def train_algo(
     models_dir: Path = MODELS_DIR,
     enable_eval_callback: bool = True,
     validation_windows: int = 5,
+    validation_cost_profiles: list[ValidationCostProfile] | None = None,
+    validation_score_mode: str = "mean_reward",
+    training_fee: float | None = None,
+    training_slippage: float | None = None,
     progress_bar: bool = False,
 ):
     """Train a single algorithm and save the best model."""
@@ -324,7 +411,12 @@ def train_algo(
 
     # ── Environment setup ────────────────────────────────────────────────
     def make_train_env():
-        env = SpotPortfolioEnv(train_data, mode="train")
+        env_kwargs = {}
+        if training_fee is not None:
+            env_kwargs["trading_fee"] = float(training_fee)
+        if training_slippage is not None:
+            env_kwargs["slippage"] = float(training_slippage)
+        env = SpotPortfolioEnv(train_data, mode="train", **env_kwargs)
         return Monitor(env, str(LOGS_DIR / algo))
 
     if algo == "SAC":
@@ -358,6 +450,8 @@ def train_algo(
             best_model_save_path=model_dir,
             algo=algo,
             eval_freq=max(1, checkpoint_freq // n_envs),
+            cost_profiles=validation_cost_profiles,
+            score_mode=validation_score_mode,
             deterministic=True,
             max_no_improvement_evals=10,
             min_evals=20,
@@ -451,6 +545,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of distinct chronological validation windows used by rolling evaluation.",
     )
     parser.add_argument(
+        "--validation-cost-profiles",
+        type=parse_validation_cost_profiles,
+        default=parse_validation_cost_profiles(None),
+        help="Comma-separated validation cost profiles as label:fee:slippage.",
+    )
+    parser.add_argument(
+        "--validation-score-mode",
+        default="mean_reward",
+        choices=["mean_reward", "worst_profile_mean", "mean_minus_std"],
+        help="Checkpoint selection score computed from rolling validation rewards.",
+    )
+    parser.add_argument(
+        "--training-fee",
+        type=float,
+        default=None,
+        help="Override the training environment fee.",
+    )
+    parser.add_argument(
+        "--training-slippage",
+        type=float,
+        default=None,
+        help="Override the training environment slippage.",
+    )
+    parser.add_argument(
         "--require-gpu",
         action="store_true",
         default=REQUIRE_GPU_FOR_TRAINING,
@@ -537,6 +655,10 @@ def main():
     device = _resolve_device(args.device)
     if args.require_gpu and not _gpu_available():
         raise RuntimeError("GPU was required but torch.cuda.is_available() is False.")
+    if args.training_fee is not None and args.training_fee < 0:
+        raise ValueError("--training-fee must be non-negative")
+    if args.training_slippage is not None and args.training_slippage < 0:
+        raise ValueError("--training-slippage must be non-negative")
     logger.info(f"Training device resolved to: {device}")
 
     algos = ALGORITHMS if args.algo == "ALL" else [args.algo]
@@ -556,6 +678,10 @@ def main():
             models_dir=args.models_dir,
             enable_eval_callback=not args.disable_eval_callback,
             validation_windows=args.validation_windows,
+            validation_cost_profiles=args.validation_cost_profiles,
+            validation_score_mode=args.validation_score_mode,
+            training_fee=args.training_fee,
+            training_slippage=args.training_slippage,
             progress_bar=args.progress_bar,
         )
 
