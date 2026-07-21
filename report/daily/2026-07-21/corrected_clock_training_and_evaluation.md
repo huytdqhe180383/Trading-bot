@@ -24,7 +24,16 @@ python -m pytest tests\test_audit_hotfixes.py tests\test_train_hygiene.py tests\
 32 passed, 1 warning
 ```
 
+After adding the RL evidence envelope, the repository-owned test suite passed:
+
+```text
+python -m pytest tests -q
+185 passed, 1 warning, 17 subtests passed
+```
+
 The warning came from `pandas_ta`/Pandas compatibility and did not affect the checked invariants.
+
+An unrestricted `pytest -q` still collects `external/Kronos` tests and a binary `test_out.txt` file; that collection path is not currently usable in this workspace without external Kronos dependencies and test discovery cleanup.
 
 ## Training Run
 
@@ -95,6 +104,15 @@ Interpretation:
 
 Not agent-trustworthy yet. This run satisfies the first corrected-clock training/evaluation milestone, but not the broader reliability plan.
 
+Implemented after the backtest:
+
+- added a typed, non-executable RL evidence envelope for analyst LLM context;
+- integrated it into analyst prompts with explicit `ABSTAIN` handling;
+- added a generator that converts backtest metrics into fail-closed evidence JSON;
+- generated today's envelope at `../../../results/daily/2026-07-21/corrected_clock_model_1/rl_evidence.json`.
+
+Today's envelope status is `ABSTAIN`, with reasons: missing promotion status, promotion expiry, full causal-integrity gate, statistical gates, calibration gate, and prospective shadow gate.
+
 Remaining gates before LLM agents should cite or act on RL output:
 
 - randomized or rolling validation windows instead of duplicate deterministic eval episodes;
@@ -114,4 +132,4 @@ Remaining gates before LLM agents should cite or act on RL output:
 - Trade decisions: `../../../results/daily/2026-07-21/2/trade_decisions_rl_only_live_like_dynamic_weighted.csv`
 - Equity curve: `../../../results/daily/2026-07-21/2/equity_curve.png`
 - KPI radar: `../../../results/daily/2026-07-21/2/kpi_target_radar.png`
-
+- RL evidence envelope: `../../../results/daily/2026-07-21/corrected_clock_model_1/rl_evidence.json`

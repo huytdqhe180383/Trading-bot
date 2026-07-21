@@ -6,11 +6,13 @@ live execution modules, order gateways, or allocation fusion code.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from config import (
     ANALYST_ENABLED,
     ANALYST_EVENT_LIMIT,
+    ANALYST_RL_EVIDENCE_MAX_AGE_SECS,
+    ANALYST_RL_EVIDENCE_PATH,
     LIVE_SESSION_TIMEZONE,
     LLM_API_KEY,
     LLM_BASE_URL,
@@ -30,6 +32,7 @@ from .llm import LLMInvalidResponseError, LLMProviderError, OpenAICompatibleLLMC
 from .market import fetch_public_snapshot
 from .models import AnalystEvent, AnalystStatus, AnalystValidationError, validate_analyst_payload
 from .news import build_news_snapshot, format_news_message
+from .rl_evidence import abstain_envelope, load_rl_evidence
 from .store import AnalystEventStore
 
 
@@ -44,6 +47,7 @@ class AnalystService:
         store: AnalystEventStore,
         enabled: bool = False,
         event_limit: int = 200,
+        rl_evidence_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         base_client = llm_client or interactive_llm_client or background_llm_client
         if base_client is None:
@@ -54,6 +58,7 @@ class AnalystService:
         self.store = store
         self.enabled = bool(enabled)
         self.event_limit = max(1, int(event_limit))
+        self.rl_evidence_provider = rl_evidence_provider
 
     def status(self) -> AnalystStatus:
         events = self.store.load_events(limit=self.event_limit)
@@ -244,6 +249,7 @@ class AnalystService:
             **prompt_payload,
             "scope": normalized_scope,
             "llm_model": getattr(llm_client, "model", ""),
+            "rl_evidence": prompt_payload.get("rl_evidence", self._safe_rl_evidence()),
         }
         try:
             self.budget.reserve(normalized_scope)
@@ -257,6 +263,9 @@ class AnalystService:
                             "You are a senior discretionary crypto market analyst. "
                             "You are not an autonomous trading system. "
                             "Synthesize price action, levels, volume, news, uncertainty, and auxiliary analyst views. "
+                            "RL evidence, when supplied, is non-executable context only. "
+                            "Treat RL evidence status ABSTAIN as no RL opinion, name uncertainty when relevant, "
+                            "and never infer quantities, leverage, orders, or target allocations from RL evidence. "
                             "Be decisive when evidence is directional and humble when it is mixed. "
                             "Output only strict JSON with natural, human-readable rationale."
                         ),
@@ -314,6 +323,7 @@ class AnalystService:
                 "alert_id": prompt_payload.get("alert_id", ""),
                 "market_snapshot": prompt_payload.get("market_snapshot", {}),
                 "news_snapshot": prompt_payload.get("news_snapshot", {}),
+                "rl_evidence": prompt_payload.get("rl_evidence", {}),
                 "auxiliary_views": prompt_payload.get("auxiliary_views", []),
                 "llm_scope": normalized_scope,
                 "llm_model": getattr(llm_client, "model", ""),
@@ -399,6 +409,7 @@ class AnalystService:
                 "scope": _normalize_llm_scope(str(prompt_payload.get("scope", ""))),
                 "symbol": prompt_payload.get("symbol", "ALL"),
                 "llm_model": prompt_payload.get("llm_model", ""),
+                "rl_evidence": prompt_payload.get("rl_evidence", {}),
             },
         )
         return self.store.append(event)
@@ -407,6 +418,17 @@ class AnalystService:
         if _normalize_llm_scope(scope) == "background":
             return self.background_llm_client
         return self.interactive_llm_client
+
+    def _safe_rl_evidence(self) -> dict[str, Any]:
+        try:
+            if self.rl_evidence_provider is not None:
+                return self.rl_evidence_provider()
+            return load_rl_evidence(
+                ANALYST_RL_EVIDENCE_PATH,
+                max_age_secs=ANALYST_RL_EVIDENCE_MAX_AGE_SECS,
+            )
+        except Exception as exc:
+            return abstain_envelope(["evidence_provider_error", type(exc).__name__]).to_dict()
 
 
 def create_default_analyst_service() -> AnalystService:

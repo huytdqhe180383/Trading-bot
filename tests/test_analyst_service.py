@@ -38,6 +38,12 @@ class AnalystServiceTest(unittest.TestCase):
             budget=LLMBudget(background_daily_limit=background_budget, interactive_daily_limit=interactive_budget),
             store=AnalystEventStore(results_dir=base / "results", reports_dir=base / "report"),
             enabled=True,
+            rl_evidence_provider=lambda: {
+                "schema_version": "rl_evidence.v1",
+                "status": "ABSTAIN",
+                "reasons": ["test_no_promoted_model"],
+                "summary": "No promoted RL evidence.",
+            },
         )
 
     def test_successful_update_records_advisory_signal(self):
@@ -51,6 +57,7 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertEqual(event.recommendation, "HOLD")
             self.assertNotIn("orders", event.to_public_dict())
             self.assertIn("news_snapshot", event.payload)
+            self.assertEqual(event.payload["rl_evidence"]["status"], "ABSTAIN")
             events = service.events()
             self.assertEqual(len(events), 1)
 
@@ -172,7 +179,31 @@ class AnalystServiceTest(unittest.TestCase):
             prompt = llm.last_kwargs["messages"][1]["content"]
             self.assertIn("market_snapshot", prompt)
             self.assertIn("auxiliary_views", prompt)
+            self.assertIn("rl_evidence", prompt)
+            self.assertIn("Treat RL evidence status ABSTAIN as no RL opinion", llm.last_kwargs["messages"][0]["content"])
             self.assertIn("Do not default to HOLD merely because the answer is advisory", prompt)
+
+    def test_rl_evidence_provider_error_fails_closed(self):
+        with TemporaryDirectory() as tmp_name:
+            base = Path(tmp_name)
+            llm = _FakeLLM()
+
+            def broken_evidence():
+                raise RuntimeError("bad evidence store")
+
+            service = AnalystService(
+                llm_client=llm,
+                budget=LLMBudget(background_daily_limit=4, interactive_daily_limit=4),
+                store=AnalystEventStore(results_dir=base / "results", reports_dir=base / "report"),
+                enabled=True,
+                rl_evidence_provider=broken_evidence,
+            )
+
+            event = service.run_update(symbol="BTCUSDT", market_snapshot={"public": True})
+
+            self.assertEqual(event.status, "ok")
+            self.assertEqual(event.payload["rl_evidence"]["status"], "ABSTAIN")
+            self.assertIn("evidence_provider_error", event.payload["rl_evidence"]["reasons"])
 
     def test_auxiliary_agent_error_does_not_block_interactive_main(self):
         with TemporaryDirectory() as tmp_name:
