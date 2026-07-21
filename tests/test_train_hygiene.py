@@ -6,10 +6,12 @@ import pandas as pd
 
 from config import MODELS_DIR
 from train import (
+    build_rolling_validation_windows,
     _load_resumed_model,
     _resolve_tensorboard_log_dir,
     build_parser,
     build_post_training_backtest_command,
+    summarize_validation_windows,
     split_train_validation,
 )
 
@@ -28,6 +30,39 @@ class TrainHygieneTest(unittest.TestCase):
         self.assertEqual(len(validation_data["BTCUSDT"]), 2)
         self.assertLess(train_data["BTCUSDT"].index[-1], validation_data["BTCUSDT"].index[0])
         self.assertEqual(validation_data["ETHUSDT"]["x"].tolist(), [18, 19])
+
+    def test_rolling_validation_windows_are_distinct_and_chronological(self):
+        idx = pd.date_range("2024-01-01", periods=12, freq="h", tz="UTC")
+        data = {
+            "BTCUSDT": pd.DataFrame({"x": range(12)}, index=idx),
+            "ETHUSDT": pd.DataFrame({"x": range(100, 112)}, index=idx),
+        }
+
+        windows = build_rolling_validation_windows(data, n_windows=3, min_rows=3)
+        summaries = summarize_validation_windows(windows)
+
+        self.assertEqual(len(windows), 3)
+        self.assertEqual([summary["rows"] for summary in summaries], [4, 4, 4])
+        self.assertLess(windows[0]["BTCUSDT"].index[-1], windows[1]["BTCUSDT"].index[0])
+        self.assertLess(windows[1]["BTCUSDT"].index[-1], windows[2]["BTCUSDT"].index[0])
+        self.assertEqual(windows[2]["ETHUSDT"]["x"].tolist(), [108, 109, 110, 111])
+
+    def test_rolling_validation_windows_fall_back_when_data_is_too_short(self):
+        idx = pd.date_range("2024-01-01", periods=5, freq="h", tz="UTC")
+        data = {
+            "BTCUSDT": pd.DataFrame({"x": range(5)}, index=idx),
+            "ETHUSDT": pd.DataFrame({"x": range(10, 15)}, index=idx),
+        }
+
+        windows = build_rolling_validation_windows(data, n_windows=5, min_rows=6)
+
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0]["BTCUSDT"].index.tolist(), idx.tolist())
+
+    def test_parser_accepts_validation_windows(self):
+        args = build_parser().parse_args(["--validation-windows", "7"])
+
+        self.assertEqual(args.validation_windows, 7)
 
     def test_post_training_backtest_defaults_to_dynamic_rl_only(self):
         args = build_parser().parse_args([])
