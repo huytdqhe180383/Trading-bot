@@ -5,6 +5,8 @@ Backtesting runner with Kronos/TradingAgents ablation matrix and realism profile
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import shutil
 from collections import deque
 from datetime import datetime
@@ -630,6 +632,154 @@ def load_kronos_raw_data(window_name: str = "full") -> dict[str, pd.DataFrame]:
 def build_benchmark_nav(test_data: dict[str, pd.DataFrame], *, initial_capital: float = INITIAL_CAPITAL) -> pd.Series:
     bench_returns = np.mean([np.exp(test_data[s]["log_return_1h"].cumsum()) for s in SYMBOLS], axis=0)
     return pd.Series(bench_returns * initial_capital, index=test_data[SYMBOLS[0]].index, name="benchmark_nav")
+
+
+def build_baseline_navs(
+    test_data: dict[str, pd.DataFrame],
+    *,
+    initial_capital: float = INITIAL_CAPITAL,
+    warmup_steps: int = LOOKBACK_WINDOW,
+) -> dict[str, pd.Series]:
+    """Build simple baseline NAVs aligned to the first executable backtest step."""
+    log_returns = pd.concat(
+        {symbol: test_data[symbol]["log_return_1h"].astype(float) for symbol in SYMBOLS},
+        axis=1,
+    ).dropna()
+    start = min(max(0, int(warmup_steps)), max(0, len(log_returns) - 1))
+    effective = log_returns.iloc[start:].copy()
+    simple_returns = np.exp(effective) - 1.0
+
+    baselines: dict[str, pd.Series] = {
+        "cash": pd.Series(float(initial_capital), index=effective.index, name="cash"),
+    }
+    for symbol in SYMBOLS:
+        baselines[f"{symbol.lower()}_buy_and_hold"] = pd.Series(
+            np.exp(effective[symbol].cumsum()) * float(initial_capital),
+            index=effective.index,
+            name=f"{symbol.lower()}_buy_and_hold",
+        )
+
+    equal_weight_growth = (1.0 + simple_returns.mean(axis=1)).cumprod()
+    baselines["equal_weight_hourly_rebalanced_before_costs"] = pd.Series(
+        equal_weight_growth * float(initial_capital),
+        index=effective.index,
+        name="equal_weight_hourly_rebalanced_before_costs",
+    )
+    return baselines
+
+
+def build_baseline_metrics_table(
+    test_data: dict[str, pd.DataFrame],
+    *,
+    initial_capital: float = INITIAL_CAPITAL,
+    warmup_steps: int = LOOKBACK_WINDOW,
+) -> pd.DataFrame:
+    """Return metrics for required simple baselines used by promotion reports."""
+    navs = build_baseline_navs(
+        test_data,
+        initial_capital=initial_capital,
+        warmup_steps=warmup_steps,
+    )
+    rows: list[dict[str, Any]] = []
+    for name, nav in navs.items():
+        metrics = compute_metrics(nav, initial_capital=initial_capital, trades_count=0)
+        rows.append(
+            {
+                "baseline": name,
+                "effective_start": str(nav.index[0]) if len(nav) else "",
+                "effective_end": str(nav.index[-1]) if len(nav) else "",
+                "rows": int(len(nav)),
+                "warmup_steps": int(warmup_steps),
+                **metrics,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def write_backtest_reliability_artifacts(
+    *,
+    test_data: dict[str, pd.DataFrame],
+    output_dir: Path,
+    initial_capital: float,
+    model_dir: Path,
+    backtest_window: str,
+) -> None:
+    baseline_df = build_baseline_metrics_table(
+        test_data,
+        initial_capital=initial_capital,
+        warmup_steps=LOOKBACK_WINDOW,
+    )
+    baseline_df.to_csv(Path(output_dir) / "backtest_baselines.csv", index=False)
+    write_json_artifact(
+        Path(output_dir) / "backtest_provenance.json",
+        build_backtest_provenance(
+            test_data=test_data,
+            model_dir=model_dir,
+            backtest_window=backtest_window,
+        ),
+    )
+
+
+def build_backtest_provenance(
+    *,
+    test_data: dict[str, pd.DataFrame],
+    model_dir: Path,
+    backtest_window: str,
+) -> dict[str, Any]:
+    """Capture reproducibility hashes for the data/schema/model inputs."""
+    model_root = Path(model_dir)
+    model_paths = {
+        "ppo_best": model_root / "PPO" / "ppo_best.zip",
+        "sac_best": model_root / "SAC" / "sac_best.zip",
+    }
+    return {
+        "created_at": datetime.now().isoformat(),
+        "backtest_window": backtest_window,
+        "lookback_window": int(LOOKBACK_WINDOW),
+        "symbols": SYMBOLS,
+        "data": {
+            symbol: {
+                "rows": int(len(frame)),
+                "start": str(frame.index[0]) if len(frame) else "",
+                "end": str(frame.index[-1]) if len(frame) else "",
+                "data_sha256": _hash_dataframe(frame),
+            }
+            for symbol, frame in test_data.items()
+        },
+        "feature_schema_sha256": _hash_feature_schema(test_data),
+        "model_dir": str(model_root),
+        "models": {
+            name: {
+                "path": str(path),
+                "sha256": _hash_file(path) if path.exists() else "",
+                "exists": path.exists(),
+            }
+            for name, path in model_paths.items()
+        },
+    }
+
+
+def _hash_dataframe(frame: pd.DataFrame) -> str:
+    digest = hashlib.sha256()
+    digest.update(pd.util.hash_pandas_object(frame, index=True).to_numpy(dtype=np.uint64).tobytes())
+    digest.update("|".join(str(col) for col in frame.columns).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _hash_feature_schema(test_data: dict[str, pd.DataFrame]) -> str:
+    payload = {
+        symbol: [str(col) for col in frame.columns]
+        for symbol, frame in sorted(test_data.items())
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _print_metrics(label: str, metrics: dict[str, float]) -> None:
@@ -1352,6 +1502,13 @@ def main() -> None:
         },
     )
     logger.info(f"Backtest session output directory -> {session_dir}")
+    write_backtest_reliability_artifacts(
+        test_data=test_data,
+        output_dir=session_dir,
+        initial_capital=args.initial_capital,
+        model_dir=args.model_dir,
+        backtest_window=args.backtest_window,
+    )
 
     if args.run_matrix:
         matrix_df, _ = run_matrix(

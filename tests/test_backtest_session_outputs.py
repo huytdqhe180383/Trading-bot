@@ -1,3 +1,4 @@
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,13 +8,17 @@ import pandas as pd
 from backtest import (
     TRADE_PROFILES,
     apply_trade_profile_overrides,
+    build_backtest_provenance,
     build_arg_parser,
+    build_baseline_metrics_table,
+    build_baseline_navs,
     build_benchmark_nav,
     build_trade_diagnostics_tables,
     create_backtest_session_dir,
     create_best_model_snapshot_dir,
     maybe_save_best_model_snapshot,
     resolve_backtest_model_dir,
+    write_backtest_reliability_artifacts,
     write_trade_decision_log,
 )
 
@@ -64,6 +69,92 @@ class BacktestSessionOutputsTest(unittest.TestCase):
         self.assertEqual(benchmark.name, "benchmark_nav")
         self.assertEqual(benchmark.index.tolist(), idx.tolist())
         self.assertAlmostEqual(float(benchmark.iloc[0]), 100.0, places=6)
+
+    def test_build_baseline_navs_align_after_lookback_warmup(self):
+        idx = pd.date_range("2026-01-01", periods=4, freq="h", tz="UTC")
+        test_data = {
+            "BTCUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.1, -0.05, 0.02]}, index=idx),
+            "ETHUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.05, -0.02, 0.01]}, index=idx),
+        }
+
+        navs = build_baseline_navs(test_data, initial_capital=100.0, warmup_steps=2)
+
+        self.assertEqual(navs["cash"].index.tolist(), idx[2:].tolist())
+        self.assertAlmostEqual(float(navs["cash"].iloc[-1]), 100.0, places=6)
+        expected_btc = 100.0 * math.exp(-0.05) * math.exp(0.02)
+        self.assertAlmostEqual(float(navs["btcusdt_buy_and_hold"].iloc[-1]), expected_btc, places=6)
+
+    def test_baseline_metrics_table_contains_required_baselines(self):
+        idx = pd.date_range("2026-01-01", periods=4, freq="h", tz="UTC")
+        test_data = {
+            "BTCUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.1, -0.05, 0.02]}, index=idx),
+            "ETHUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.05, -0.02, 0.01]}, index=idx),
+        }
+
+        table = build_baseline_metrics_table(test_data, initial_capital=100.0, warmup_steps=1)
+
+        self.assertEqual(
+            set(table["baseline"]),
+            {
+                "cash",
+                "btcusdt_buy_and_hold",
+                "ethusdt_buy_and_hold",
+                "equal_weight_hourly_rebalanced_before_costs",
+            },
+        )
+        self.assertIn("total_return_pct", table.columns)
+        self.assertTrue((table["rows"] == 3).all())
+
+    def test_write_backtest_reliability_artifacts_outputs_baselines_and_provenance(self):
+        idx = pd.date_range("2026-01-01", periods=4, freq="h", tz="UTC")
+        test_data = {
+            "BTCUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.1, -0.05, 0.02]}, index=idx),
+            "ETHUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.05, -0.02, 0.01]}, index=idx),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            model_dir = out / "models"
+            (model_dir / "PPO").mkdir(parents=True)
+            (model_dir / "SAC").mkdir(parents=True)
+            (model_dir / "PPO" / "ppo_best.zip").write_bytes(b"ppo")
+            (model_dir / "SAC" / "sac_best.zip").write_bytes(b"sac")
+
+            write_backtest_reliability_artifacts(
+                test_data=test_data,
+                output_dir=out,
+                initial_capital=100.0,
+                model_dir=model_dir,
+                backtest_window="unit",
+            )
+
+            baselines = pd.read_csv(out / "backtest_baselines.csv")
+            provenance = (out / "backtest_provenance.json").read_text(encoding="utf-8")
+
+        self.assertIn("cash", set(baselines["baseline"]))
+        self.assertIn("feature_schema_sha256", provenance)
+
+    def test_backtest_provenance_records_model_hashes(self):
+        idx = pd.date_range("2026-01-01", periods=2, freq="h", tz="UTC")
+        test_data = {
+            "BTCUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.1]}, index=idx),
+            "ETHUSDT": pd.DataFrame({"log_return_1h": [0.0, 0.05]}, index=idx),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp) / "models"
+            (model_dir / "PPO").mkdir(parents=True)
+            (model_dir / "SAC").mkdir(parents=True)
+            (model_dir / "PPO" / "ppo_best.zip").write_bytes(b"ppo")
+            (model_dir / "SAC" / "sac_best.zip").write_bytes(b"sac")
+
+            provenance = build_backtest_provenance(
+                test_data=test_data,
+                model_dir=model_dir,
+                backtest_window="unit",
+            )
+
+        self.assertEqual(provenance["backtest_window"], "unit")
+        self.assertTrue(provenance["models"]["ppo_best"]["exists"])
+        self.assertEqual(len(provenance["feature_schema_sha256"]), 64)
 
     def test_create_backtest_session_dir_uses_daily_incrementing_number(self):
         with tempfile.TemporaryDirectory() as tmp:

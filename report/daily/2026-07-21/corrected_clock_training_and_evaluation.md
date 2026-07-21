@@ -89,14 +89,15 @@ Simple same-window baselines, compounded from processed `log_return_1h` after th
 
 | Baseline | Total return | Sharpe | Max drawdown |
 | --- | ---: | ---: | ---: |
-| BTC buy-and-hold | 40.99% | 0.5353 | -50.65% |
-| ETH buy-and-hold | -25.52% | 0.1541 | -65.28% |
-| 50/50 hourly rebalanced before costs | 2.47% | 0.2932 | -57.26% |
+| Cash | 0.00% | 0.0000 | 0.00% |
+| BTC buy-and-hold | 40.99% | 0.2944 | -50.65% |
+| ETH buy-and-hold | -25.52% | -0.1803 | -65.28% |
+| 50/50 hourly rebalanced before costs | 7.43% | 0.0544 | -56.91% |
 
 Interpretation:
 
 - The challenger dramatically reduces drawdown versus raw crypto exposure.
-- It beats the simple 50/50 total return, but not its Sharpe.
+- It trails the simple 50/50 total return and Sharpe, but with much lower drawdown.
 - It trails BTC buy-and-hold return and Sharpe, while using far less market exposure.
 - The final episode state is 100% cash after risk exit/reentry lock, so the apparent stability comes partly from governance rather than pure alpha.
 
@@ -110,6 +111,8 @@ Implemented after the backtest:
 - integrated it into analyst prompts with explicit `ABSTAIN` handling;
 - added a generator that converts backtest metrics into fail-closed evidence JSON;
 - generated today's envelope at `../../../results/daily/2026-07-21/corrected_clock_model_1/rl_evidence.json`.
+- added automatic backtest reliability artifacts for simple baselines and reproducibility provenance;
+- generated the current run's `../../../results/daily/2026-07-21/2/backtest_baselines.csv` and `../../../results/daily/2026-07-21/2/backtest_provenance.json` without rerunning the model.
 
 Today's envelope status is `ABSTAIN`, with reasons: missing promotion status, promotion expiry, full causal-integrity gate, statistical gates, calibration gate, and prospective shadow gate.
 
@@ -128,6 +131,8 @@ Remaining gates before LLM agents should cite or act on RL output:
 - Training stderr: `../../../results/daily/2026-07-21/corrected_clock_model_1/training_stderr_2.log`
 - Model folder: `../../../results/daily/2026-07-21/corrected_clock_model_1/models/`
 - Backtest metrics: `../../../results/daily/2026-07-21/2/backtest_metrics.csv`
+- Backtest baselines: `../../../results/daily/2026-07-21/2/backtest_baselines.csv`
+- Backtest provenance: `../../../results/daily/2026-07-21/2/backtest_provenance.json`
 - Episode parquet: `../../../results/daily/2026-07-21/2/backtest_episode_rl_only_live_like_dynamic_weighted.parquet`
 - Trade decisions: `../../../results/daily/2026-07-21/2/trade_decisions_rl_only_live_like_dynamic_weighted.csv`
 - Equity curve: `../../../results/daily/2026-07-21/2/equity_curve.png`
