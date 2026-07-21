@@ -442,20 +442,16 @@ class SpotPortfolioEnv(gym.Env):
 
     def _get_returns(self) -> np.ndarray:
         """
-        Return the price-change ratio for the *just-completed* candle.
+        Return the next tradable close-to-close price-change ratio.
 
-        Fix 3-A (audit Finding 1-F / 2-C):
-        At decision time the agent's observation window covers
-        [step_idx - lookback, step_idx), so the most recent bar in view
-        is step_idx-1.  That bar's close-to-close return (log_return at
-        index step_idx-1) is now fully realised; the agent's new weights
-        are applied as if filled at that bar's close.
-
-        Using step_idx (the *next* unseen bar) was the critical off-by-one
-        that allowed the model to earn returns on prices it had not yet
-        observed.
+        At decision time the observation window covers
+        [step_idx - lookback, step_idx), so the latest close visible to
+        the policy is row step_idx - 1. New weights are chosen at that
+        boundary and earn row step_idx, i.e. close[step_idx] /
+        close[step_idx - 1]. Using step_idx - 1 would credit the new
+        action with a return that was already visible in the observation.
         """
-        return self._returns_array[self._step_idx - 1]
+        return self._returns_array[self._step_idx]
 
     def _current_volatility_proxy(self) -> float:
         end = max(0, self._step_idx)

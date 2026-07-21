@@ -43,6 +43,23 @@ class AuditHotfixTest(unittest.TestCase):
         self.assertEqual(regime["macro_trend"], 0.0)
         self.assertEqual(components["opportunity_component"], 0.0)
 
+    def test_step_return_is_next_unseen_candle_after_observation_window(self):
+        data = _sample_data()
+        for frame in data.values():
+            frame["atr_14"] = np.arange(len(frame), dtype=float)
+            frame["log_return_1h"] = 0.0
+        data["BTCUSDT"].iloc[29, data["BTCUSDT"].columns.get_loc("log_return_1h")] = np.log(0.50)
+        data["ETHUSDT"].iloc[29, data["ETHUSDT"].columns.get_loc("log_return_1h")] = np.log(2.00)
+        data["BTCUSDT"].iloc[30, data["BTCUSDT"].columns.get_loc("log_return_1h")] = np.log(1.25)
+        data["ETHUSDT"].iloc[30, data["ETHUSDT"].columns.get_loc("log_return_1h")] = np.log(0.75)
+
+        env = SpotPortfolioEnv(data, lookback=30, mode="eval")
+        obs, _ = env.reset()
+        first_symbol_window = obs[: env.lookback * env._n_features].reshape(env.lookback, env._n_features)
+
+        self.assertEqual(float(first_symbol_window[-1, env._atr_idx]), 29.0)
+        np.testing.assert_allclose(env._get_returns(), np.array([1.25, 0.75], dtype=np.float32))
+
     def test_live_higher_timeframe_features_are_shifted_before_indicators(self):
         idx = pd.date_range("2026-01-01", periods=40, freq="4h", tz="UTC")
         raw = pd.DataFrame(
@@ -123,7 +140,7 @@ class AuditHotfixTest(unittest.TestCase):
             trading_env.KILL_SWITCH_DRAWDOWN_THRESHOLD = -0.005
             data = _sample_data()
             for frame in data.values():
-                frame.iloc[29, frame.columns.get_loc("log_return_1h")] = np.log(0.99)
+                frame.iloc[30, frame.columns.get_loc("log_return_1h")] = np.log(0.99)
             env = SpotPortfolioEnv(data, lookback=30, mode="eval")
             env._weights = np.array([1.0, 0.0, 0.0], dtype=np.float32)
 
@@ -235,7 +252,7 @@ class AuditHotfixTest(unittest.TestCase):
             self.assertTrue(info_blocked["rebalance_blocked_by_cooldown"])
             self.assertAlmostEqual(float(info_blocked["executed_weight_delta"]), 0.0, places=6)
 
-            env._returns_array[env._step_idx - 1, 0] = 0.80
+            env._returns_array[env._step_idx, 0] = 0.80
             env._asset_synthetic_prices[0] = 1.0
             env._asset_highest_prices[0] = 1.0
             _, _, _, _, info_stop = env.step_weights(env._weights.copy())

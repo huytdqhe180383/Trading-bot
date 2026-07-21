@@ -86,8 +86,8 @@ def _resolve_tensorboard_log_dir() -> str | None:
     return str(LOGS_DIR / "tensorboard")
 
 
-def _candidate_resume_paths(algo: str) -> list[Path]:
-    algo_dir = MODELS_DIR / algo
+def _candidate_resume_paths(algo: str, models_dir: Path = MODELS_DIR) -> list[Path]:
+    algo_dir = Path(models_dir) / algo
     lower = algo.lower()
     return [
         algo_dir / "best_model.zip",
@@ -96,7 +96,11 @@ def _candidate_resume_paths(algo: str) -> list[Path]:
     ] + sorted(algo_dir.glob(f"{lower}_*_steps.zip"), reverse=True)
 
 
-def _resolve_resume_checkpoint(algo: str, explicit: Path | None = None) -> Path | None:
+def _resolve_resume_checkpoint(
+    algo: str,
+    explicit: Path | None = None,
+    models_dir: Path = MODELS_DIR,
+) -> Path | None:
     if explicit is not None:
         if explicit.is_file():
             return explicit
@@ -117,7 +121,7 @@ def _resolve_resume_checkpoint(algo: str, explicit: Path | None = None) -> Path 
             return None
         return None
 
-    for path in _candidate_resume_paths(algo):
+    for path in _candidate_resume_paths(algo, models_dir=models_dir):
         if path.exists():
             return path
     return None
@@ -152,6 +156,7 @@ def train_algo(
     validation_fraction: float,
     resume: bool = False,
     resume_from: Path | None = None,
+    models_dir: Path = MODELS_DIR,
     enable_eval_callback: bool = True,
     progress_bar: bool = False,
 ):
@@ -191,7 +196,8 @@ def train_algo(
         eval_env = make_vec_env(make_eval_env, n_envs=1, seed=seed + 10_000, vec_env_cls=eval_vec_cls)
 
     # ── Callbacks ────────────────────────────────────────────────────────
-    model_dir = MODELS_DIR / algo
+    model_root = Path(models_dir)
+    model_dir = model_root / algo
     model_dir.mkdir(parents=True, exist_ok=True)
     
     checkpoint_freq = CHECKPOINT_FREQ.get(algo, 50_000) if isinstance(CHECKPOINT_FREQ, dict) else CHECKPOINT_FREQ
@@ -231,7 +237,7 @@ def train_algo(
     # On-policy algorithms (PPO) need the env at init time;
     # off-policy (SAC) take it too but also accept replay buffers.
     if resume:
-        checkpoint = _resolve_resume_checkpoint(algo, explicit=resume_from)
+        checkpoint = _resolve_resume_checkpoint(algo, explicit=resume_from, models_dir=model_root)
         if checkpoint is not None:
             logger.info(f"Resuming {algo} from checkpoint: {checkpoint}")
             model = _load_resumed_model(
@@ -331,6 +337,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable the SB3 rich progress bar.",
     )
     parser.add_argument(
+        "--models-dir",
+        type=Path,
+        default=MODELS_DIR,
+        help="Directory where trained checkpoints are read/written.",
+    )
+    parser.add_argument(
         "--skip-backtest",
         dest="post_training_backtest",
         action="store_false",
@@ -367,6 +379,8 @@ def build_post_training_backtest_command(args: argparse.Namespace) -> list[str]:
         args.post_backtest_realism_profile,
         "--method",
         args.post_backtest_method,
+        "--model-dir",
+        str(args.models_dir),
     ]
 
 
@@ -399,6 +413,7 @@ def main():
             validation_fraction=args.validation_fraction,
             resume=args.resume,
             resume_from=resume_from_path,
+            models_dir=args.models_dir,
             enable_eval_callback=not args.disable_eval_callback,
             progress_bar=args.progress_bar,
         )

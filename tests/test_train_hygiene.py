@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from config import MODELS_DIR
 from train import (
     _load_resumed_model,
     _resolve_tensorboard_log_dir,
@@ -48,6 +49,8 @@ class TrainHygieneTest(unittest.TestCase):
                 "live_like",
                 "--method",
                 "dynamic_weighted",
+                "--model-dir",
+                str(MODELS_DIR),
             ],
         )
 
