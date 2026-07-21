@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import subprocess
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -83,7 +84,7 @@ from metrics.performance import (
 )
 from data.kronos_windows import load_raw_ohlcv_data, window_raw_ohlcv
 from risk.post_policy_overlay import apply_post_policy_overlay
-from tradingbot.runtime.artifacts import create_numbered_daily_dir, write_json_artifact
+from tradingbot.runtime.artifacts import append_csv_row, create_numbered_daily_dir, write_json_artifact
 
 load_dotenv()
 
@@ -703,21 +704,95 @@ def write_backtest_reliability_artifacts(
     initial_capital: float,
     model_dir: Path,
     backtest_window: str,
-) -> None:
+) -> dict[str, Any]:
     baseline_df = build_baseline_metrics_table(
         test_data,
         initial_capital=initial_capital,
         warmup_steps=LOOKBACK_WINDOW,
     )
     baseline_df.to_csv(Path(output_dir) / "backtest_baselines.csv", index=False)
+    provenance = build_backtest_provenance(
+        test_data=test_data,
+        model_dir=model_dir,
+        backtest_window=backtest_window,
+    )
     write_json_artifact(
         Path(output_dir) / "backtest_provenance.json",
-        build_backtest_provenance(
-            test_data=test_data,
-            model_dir=model_dir,
-            backtest_window=backtest_window,
+        provenance,
+    )
+    return provenance
+
+
+def append_backtest_trial_registry(
+    *,
+    session_dir: Path,
+    run_label: str,
+    metrics: dict[str, Any],
+    meta: dict[str, Any],
+    provenance: dict[str, Any],
+) -> None:
+    """Append one compact trial row for later DSR/PBO/bootstrap accounting."""
+    append_csv_row(
+        Path(session_dir).parent / "backtest_trial_registry.csv",
+        build_backtest_trial_registry_row(
+            session_dir=session_dir,
+            run_label=run_label,
+            metrics=metrics,
+            meta=meta,
+            provenance=provenance,
         ),
     )
+
+
+def build_backtest_trial_registry_row(
+    *,
+    session_dir: Path,
+    run_label: str,
+    metrics: dict[str, Any],
+    meta: dict[str, Any],
+    provenance: dict[str, Any],
+) -> dict[str, Any]:
+    data = provenance.get("data", {}) if isinstance(provenance, dict) else {}
+    models = provenance.get("models", {}) if isinstance(provenance, dict) else {}
+    gates = {
+        "causal_integrity": "partial",
+        "statistical_uncertainty": "missing",
+        "calibration": "missing",
+        "prospective_shadow": "missing",
+        "promotion_status": "not_promoted",
+    }
+    return {
+        "created_at": datetime.now().isoformat(),
+        "run_label": run_label,
+        "session_dir": str(session_dir),
+        "pipeline": meta.get("pipeline", ""),
+        "method": meta.get("method", ""),
+        "realism_profile": meta.get("realism_profile", ""),
+        "backtest_window": provenance.get("backtest_window", ""),
+        "initial_capital": meta.get("initial_capital", ""),
+        "model_dir": meta.get("model_dir", provenance.get("model_dir", "")),
+        "code_commit": _current_git_commit(),
+        "code_dirty": _git_worktree_dirty(),
+        "feature_schema_sha256": provenance.get("feature_schema_sha256", ""),
+        "data_hashes_json": json.dumps(
+            {symbol: details.get("data_sha256", "") for symbol, details in data.items()},
+            sort_keys=True,
+        ),
+        "model_hashes_json": json.dumps(
+            {name: details.get("sha256", "") for name, details in models.items()},
+            sort_keys=True,
+        ),
+        "gate_status_json": json.dumps(gates, sort_keys=True),
+        "total_return_pct": metrics.get("total_return_pct", ""),
+        "annualised_return_pct": metrics.get("annualised_return_pct", ""),
+        "sharpe_ratio": metrics.get("sharpe_ratio", ""),
+        "sortino_ratio": metrics.get("sortino_ratio", ""),
+        "max_drawdown_pct": metrics.get("max_drawdown_pct", ""),
+        "calmar_ratio": metrics.get("calmar_ratio", ""),
+        "profit_factor": metrics.get("profit_factor", ""),
+        "cvar_95_pct": metrics.get("cvar_95_pct", ""),
+        "total_trades_count": metrics.get("total_trades_count", ""),
+    }
 
 
 def build_backtest_provenance(
@@ -780,6 +855,31 @@ def _hash_file(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _current_git_commit() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return ""
+
+
+def _git_worktree_dirty() -> bool:
+    try:
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=Path(__file__).resolve().parent,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return False
+    return bool(status.strip())
 
 
 def _print_metrics(label: str, metrics: dict[str, float]) -> None:
@@ -1252,6 +1352,7 @@ def run_backtest(
     trades_count = int((df["transaction_cost"] > 0).sum())
     meta = {
         "pipeline": pipeline,
+        "method": method,
         "realism_profile": realism_profile,
         "fee": profile["fee"],
         "slippage": profile["slippage"],
@@ -1272,6 +1373,7 @@ def run_matrix(
     output_dir: Path,
     model_dir: Path = MODELS_DIR,
     post_policy_overlay: str = "none",
+    backtest_window: str = "unknown",
     overlay_target_volatility: float = 0.04,
     overlay_persistence_turnover_cap: float = 0.15,
     overlay_trend_gate_threshold: float = 0.0,
@@ -1281,6 +1383,11 @@ def run_matrix(
     initial_capital: float = INITIAL_CAPITAL,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     benchmark = build_benchmark_nav(test_data, initial_capital=initial_capital)
+    provenance = build_backtest_provenance(
+        test_data=test_data,
+        model_dir=model_dir,
+        backtest_window=backtest_window,
+    )
     matrix_rows: list[dict[str, Any]] = []
     realism_rows: list[dict[str, Any]] = []
 
@@ -1313,6 +1420,13 @@ def run_matrix(
         )
         metrics.update(compute_trade_metrics(episode_df))
         _print_metrics(f"{pipeline}/{realism_profile}", metrics)
+        append_backtest_trial_registry(
+            session_dir=output_dir,
+            run_label=f"{pipeline}_{realism_profile}_{method}",
+            metrics=metrics,
+            meta=meta,
+            provenance=provenance,
+        )
         row = dict(meta)
         row.update(metrics)
         row.update(_episode_diagnostics(episode_df))
@@ -1402,6 +1516,7 @@ def run_ensemble_method_comparison(
     output_dir: Path,
     model_dir: Path = MODELS_DIR,
     post_policy_overlay: str = "none",
+    backtest_window: str = "unknown",
     overlay_target_volatility: float = 0.04,
     overlay_persistence_turnover_cap: float = 0.15,
     overlay_trend_gate_threshold: float = 0.0,
@@ -1411,6 +1526,11 @@ def run_ensemble_method_comparison(
     initial_capital: float = INITIAL_CAPITAL,
 ) -> pd.DataFrame:
     benchmark = build_benchmark_nav(test_data, initial_capital=initial_capital)
+    provenance = build_backtest_provenance(
+        test_data=test_data,
+        model_dir=model_dir,
+        backtest_window=backtest_window,
+    )
     rows: list[dict[str, Any]] = []
     equity_curves: dict[str, pd.Series] = {}
     for method in methods:
@@ -1448,6 +1568,13 @@ def run_ensemble_method_comparison(
             trades_count=trades_count,
         )
         metrics.update(compute_trade_metrics(episode_df))
+        append_backtest_trial_registry(
+            session_dir=output_dir,
+            run_label=f"{pipeline}_{realism_profile}_{method}",
+            metrics=metrics,
+            meta=meta,
+            provenance=provenance,
+        )
         row = {"method": method, **meta}
         row.update(metrics)
         row.update(_episode_diagnostics(episode_df))
@@ -1502,7 +1629,7 @@ def main() -> None:
         },
     )
     logger.info(f"Backtest session output directory -> {session_dir}")
-    write_backtest_reliability_artifacts(
+    provenance = write_backtest_reliability_artifacts(
         test_data=test_data,
         output_dir=session_dir,
         initial_capital=args.initial_capital,
@@ -1519,6 +1646,7 @@ def main() -> None:
             output_dir=session_dir,
             model_dir=args.model_dir,
             post_policy_overlay=args.post_policy_overlay,
+            backtest_window=args.backtest_window,
             overlay_target_volatility=args.overlay_target_volatility,
             overlay_persistence_turnover_cap=args.overlay_persistence_turnover_cap,
             overlay_trend_gate_threshold=args.overlay_trend_gate_threshold,
@@ -1550,6 +1678,7 @@ def main() -> None:
             output_dir=session_dir,
             model_dir=args.model_dir,
             post_policy_overlay=args.post_policy_overlay,
+            backtest_window=args.backtest_window,
             overlay_target_volatility=args.overlay_target_volatility,
             overlay_persistence_turnover_cap=args.overlay_persistence_turnover_cap,
             overlay_trend_gate_threshold=args.overlay_trend_gate_threshold,
@@ -1600,6 +1729,13 @@ def main() -> None:
                 trades_count=trades_count,
             )
             metrics.update(compute_trade_metrics(episode_df))
+            append_backtest_trial_registry(
+                session_dir=session_dir,
+                run_label=f"rl_only_{profile}_{args.method}",
+                metrics=metrics,
+                meta=meta,
+                provenance=provenance,
+            )
             row = dict(meta)
             row.update(metrics)
             rows.append(row)
@@ -1654,6 +1790,13 @@ def main() -> None:
     )
     metrics.update(compute_trade_metrics(episode_df))
     _print_metrics(f"{args.pipeline}/{args.realism_profile}", metrics)
+    append_backtest_trial_registry(
+        session_dir=session_dir,
+        run_label=f"{args.pipeline}_{args.realism_profile}_{args.method}",
+        metrics=metrics,
+        meta=meta,
+        provenance=provenance,
+    )
 
     episode_path = session_dir / f"backtest_episode_{args.pipeline}_{args.realism_profile}_{args.method}.parquet"
     episode_df.to_parquet(episode_path)

@@ -7,9 +7,11 @@ import pandas as pd
 
 from backtest import (
     TRADE_PROFILES,
+    append_backtest_trial_registry,
     apply_trade_profile_overrides,
     build_backtest_provenance,
     build_arg_parser,
+    build_backtest_trial_registry_row,
     build_baseline_metrics_table,
     build_baseline_navs,
     build_benchmark_nav,
@@ -155,6 +157,67 @@ class BacktestSessionOutputsTest(unittest.TestCase):
         self.assertEqual(provenance["backtest_window"], "unit")
         self.assertTrue(provenance["models"]["ppo_best"]["exists"])
         self.assertEqual(len(provenance["feature_schema_sha256"]), 64)
+
+    def test_backtest_trial_registry_row_contains_hashes_gates_and_metrics(self):
+        provenance = {
+            "backtest_window": "unit",
+            "feature_schema_sha256": "a" * 64,
+            "data": {"BTCUSDT": {"data_sha256": "btc_hash"}},
+            "models": {"ppo_best": {"sha256": "ppo_hash"}},
+            "model_dir": "models/unit",
+        }
+
+        row = build_backtest_trial_registry_row(
+            session_dir=Path("results/daily/2026-01-01/1"),
+            run_label="rl_only_live_like_dynamic_weighted",
+            metrics={"total_return_pct": 1.5, "sharpe_ratio": 0.2},
+            meta={
+                "pipeline": "rl_only",
+                "method": "dynamic_weighted",
+                "realism_profile": "live_like",
+                "initial_capital": 100.0,
+            },
+            provenance=provenance,
+        )
+
+        self.assertEqual(row["run_label"], "rl_only_live_like_dynamic_weighted")
+        self.assertEqual(row["backtest_window"], "unit")
+        self.assertIn("btc_hash", row["data_hashes_json"])
+        self.assertIn("ppo_hash", row["model_hashes_json"])
+        self.assertIn("promotion_status", row["gate_status_json"])
+        self.assertEqual(row["total_return_pct"], 1.5)
+
+    def test_append_backtest_trial_registry_appends_to_daily_file(self):
+        provenance = {
+            "backtest_window": "unit",
+            "feature_schema_sha256": "a" * 64,
+            "data": {"BTCUSDT": {"data_sha256": "btc_hash"}},
+            "models": {"ppo_best": {"sha256": "ppo_hash"}},
+            "model_dir": "models/unit",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp) / "daily" / "2026-01-01" / "1"
+            session_dir.mkdir(parents=True)
+
+            append_backtest_trial_registry(
+                session_dir=session_dir,
+                run_label="first",
+                metrics={"total_return_pct": 1.0},
+                meta={"pipeline": "rl_only"},
+                provenance=provenance,
+            )
+            append_backtest_trial_registry(
+                session_dir=session_dir,
+                run_label="second",
+                metrics={"total_return_pct": 2.0},
+                meta={"pipeline": "rl_only"},
+                provenance=provenance,
+            )
+
+            registry = pd.read_csv(session_dir.parent / "backtest_trial_registry.csv")
+
+        self.assertEqual(registry["run_label"].tolist(), ["first", "second"])
+        self.assertEqual(registry["total_return_pct"].tolist(), [1.0, 2.0])
 
     def test_create_backtest_session_dir_uses_daily_incrementing_number(self):
         with tempfile.TemporaryDirectory() as tmp:

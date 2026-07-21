@@ -112,7 +112,8 @@ Implemented after the backtest:
 - added a generator that converts backtest metrics into fail-closed evidence JSON;
 - generated today's envelope at `../../../results/daily/2026-07-21/corrected_clock_model_1/rl_evidence.json`.
 - added automatic backtest reliability artifacts for simple baselines and reproducibility provenance;
-- generated the current run's `../../../results/daily/2026-07-21/2/backtest_baselines.csv` and `../../../results/daily/2026-07-21/2/backtest_provenance.json` without rerunning the model.
+- added an append-only daily trial registry for backtest comparisons;
+- generated the current run's `../../../results/daily/2026-07-21/2/backtest_baselines.csv`, `../../../results/daily/2026-07-21/2/backtest_provenance.json`, and `../../../results/daily/2026-07-21/backtest_trial_registry.csv` without rerunning the model.
 
 Today's envelope status is `ABSTAIN`, with reasons: missing promotion status, promotion expiry, full causal-integrity gate, statistical gates, calibration gate, and prospective shadow gate.
 
@@ -133,6 +134,7 @@ Remaining gates before LLM agents should cite or act on RL output:
 - Backtest metrics: `../../../results/daily/2026-07-21/2/backtest_metrics.csv`
 - Backtest baselines: `../../../results/daily/2026-07-21/2/backtest_baselines.csv`
 - Backtest provenance: `../../../results/daily/2026-07-21/2/backtest_provenance.json`
+- Trial registry: `../../../results/daily/2026-07-21/backtest_trial_registry.csv`
 - Episode parquet: `../../../results/daily/2026-07-21/2/backtest_episode_rl_only_live_like_dynamic_weighted.parquet`
 - Trade decisions: `../../../results/daily/2026-07-21/2/trade_decisions_rl_only_live_like_dynamic_weighted.csv`
 - Equity curve: `../../../results/daily/2026-07-21/2/equity_curve.png`
