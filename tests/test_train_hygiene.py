@@ -106,6 +106,36 @@ class TrainHygieneTest(unittest.TestCase):
         self.assertEqual(args.training_fee, 0.0024)
         self.assertEqual(args.training_slippage, 0.0036)
 
+    def test_parser_accepts_training_reward_and_turnover_cap_options(self):
+        args = build_parser().parse_args(
+            [
+                "--training-reward-turnover-weight",
+                "5.0",
+                "--training-reward-action-delta-weight",
+                "2.0",
+                "--training-reward-action-delta-deadband",
+                "0.0",
+                "--training-reward-action-delta-scale",
+                "1.5",
+                "--training-step-turnover-cap",
+                "--training-step-turnover-cap-normal",
+                "0.15",
+                "--training-step-turnover-cap-stress",
+                "0.10",
+                "--training-step-turnover-cap-crisis",
+                "0.06",
+            ]
+        )
+
+        self.assertEqual(args.training_reward_turnover_weight, 5.0)
+        self.assertEqual(args.training_reward_action_delta_weight, 2.0)
+        self.assertEqual(args.training_reward_action_delta_deadband, 0.0)
+        self.assertEqual(args.training_reward_action_delta_scale, 1.5)
+        self.assertTrue(args.training_step_turnover_cap)
+        self.assertEqual(args.training_step_turnover_cap_normal, 0.15)
+        self.assertEqual(args.training_step_turnover_cap_stress, 0.10)
+        self.assertEqual(args.training_step_turnover_cap_crisis, 0.06)
+
     def test_post_training_backtest_defaults_to_dynamic_rl_only(self):
         args = build_parser().parse_args([])
 
@@ -140,6 +170,29 @@ class TrainHygieneTest(unittest.TestCase):
         args = build_parser().parse_args(["--skip-backtest"])
 
         self.assertFalse(args.post_training_backtest)
+
+    def test_post_training_backtest_forwards_turnover_cap_controls(self):
+        args = build_parser().parse_args(
+            [
+                "--training-step-turnover-cap",
+                "--training-step-turnover-cap-normal",
+                "0.15",
+                "--training-step-turnover-cap-stress",
+                "0.10",
+                "--training-step-turnover-cap-crisis",
+                "0.06",
+            ]
+        )
+
+        command = build_post_training_backtest_command(args)
+
+        self.assertIn("--step-turnover-cap-enabled", command)
+        self.assertIn("--step-turnover-cap-normal", command)
+        self.assertIn("0.15", command)
+        self.assertIn("--step-turnover-cap-stress", command)
+        self.assertIn("0.1", command)
+        self.assertIn("--step-turnover-cap-crisis", command)
+        self.assertIn("0.06", command)
 
     def test_load_resumed_model_reapplies_requested_seed(self):
         cls = Mock()

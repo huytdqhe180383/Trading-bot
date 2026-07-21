@@ -69,6 +69,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--run-label", default="rl_cost_stress")
+    parser.add_argument(
+        "--step-turnover-cap-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Forward per-step turnover cap enable/disable to backtest.py.",
+    )
+    parser.add_argument("--step-turnover-cap-normal", type=float, default=None)
+    parser.add_argument("--step-turnover-cap-stress", type=float, default=None)
+    parser.add_argument("--step-turnover-cap-crisis", type=float, default=None)
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -136,8 +145,12 @@ def build_backtest_command(
     pipeline: str = DEFAULT_PIPELINE,
     realism_profile: str = DEFAULT_REALISM_PROFILE,
     method: str = DEFAULT_METHOD,
+    step_turnover_cap_enabled: bool | None = None,
+    step_turnover_cap_normal: float | None = None,
+    step_turnover_cap_stress: float | None = None,
+    step_turnover_cap_crisis: float | None = None,
 ) -> list[str]:
-    return [
+    command = [
         sys.executable,
         "backtest.py",
         "--pipeline",
@@ -157,6 +170,20 @@ def build_backtest_command(
         "--autosave-profit-threshold",
         "999999",
     ]
+    if step_turnover_cap_enabled is True:
+        command.append("--step-turnover-cap-enabled")
+    elif step_turnover_cap_enabled is False:
+        command.append("--no-step-turnover-cap-enabled")
+    for flag, value in [
+        ("--step-turnover-cap-normal", step_turnover_cap_normal),
+        ("--step-turnover-cap-stress", step_turnover_cap_stress),
+        ("--step-turnover-cap-crisis", step_turnover_cap_crisis),
+    ]:
+        if value is not None:
+            if value < 0:
+                raise ValueError(f"{flag} must be non-negative")
+            command.extend([flag, str(value)])
+    return command
 
 
 def build_evidence_command(*, metrics_path: Path, metadata_path: Path, statistical_report_path: Path, output_path: Path) -> list[str]:
@@ -262,6 +289,10 @@ def run_cost_stress(args: argparse.Namespace) -> Path:
                     pipeline=args.pipeline,
                     realism_profile=args.realism_profile,
                     method=args.method,
+                    step_turnover_cap_enabled=args.step_turnover_cap_enabled,
+                    step_turnover_cap_normal=args.step_turnover_cap_normal,
+                    step_turnover_cap_stress=args.step_turnover_cap_stress,
+                    step_turnover_cap_crisis=args.step_turnover_cap_crisis,
                 ),
                 stdout_path=backtest_stdout,
                 stderr_path=backtest_stderr,

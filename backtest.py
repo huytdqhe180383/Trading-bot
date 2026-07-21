@@ -61,6 +61,10 @@ from config import (
     REBALANCE_THRESHOLD_NORMAL,
     REBALANCE_THRESHOLD_STRESS,
     REVERSAL_HYSTERESIS_MULT,
+    STEP_TURNOVER_CAP_CRISIS,
+    STEP_TURNOVER_CAP_ENABLED,
+    STEP_TURNOVER_CAP_NORMAL,
+    STEP_TURNOVER_CAP_STRESS,
     POSITION_CAP_MODE,
     RAW_DATA_DIR,
     RESULTS_DIR,
@@ -216,6 +220,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reversal-hysteresis-mult", type=float, default=REVERSAL_HYSTERESIS_MULT)
     parser.add_argument("--position-reset-weight-threshold", type=float, default=POSITION_RESET_WEIGHT_THRESHOLD)
     parser.add_argument("--position-reset-persist-bars", type=int, default=POSITION_RESET_PERSIST_BARS)
+    parser.add_argument(
+        "--step-turnover-cap-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=STEP_TURNOVER_CAP_ENABLED,
+        help="Enable or disable the environment per-step turnover cap.",
+    )
+    parser.add_argument("--step-turnover-cap-normal", type=float, default=STEP_TURNOVER_CAP_NORMAL)
+    parser.add_argument("--step-turnover-cap-stress", type=float, default=STEP_TURNOVER_CAP_STRESS)
+    parser.add_argument("--step-turnover-cap-crisis", type=float, default=STEP_TURNOVER_CAP_CRISIS)
     parser.add_argument("--autosave-profit-threshold", type=float, default=70.0)
     return parser
 
@@ -260,6 +273,14 @@ def apply_execution_control_overrides(args: argparse.Namespace) -> None:
     trading_env_module.POSITION_RESET_WEIGHT_THRESHOLD = float(args.position_reset_weight_threshold)
     trading_env_module.POSITION_RESET_PERSIST_BARS = int(args.position_reset_persist_bars)
     trading_env_module.POSITION_CAP_MODE = str(args.position_cap_mode)
+    for name in ["step_turnover_cap_normal", "step_turnover_cap_stress", "step_turnover_cap_crisis"]:
+        value = float(getattr(args, name))
+        if value < 0:
+            raise ValueError(f"--{name.replace('_', '-')} must be non-negative")
+    trading_env_module.STEP_TURNOVER_CAP_ENABLED = bool(args.step_turnover_cap_enabled)
+    trading_env_module.STEP_TURNOVER_CAP_NORMAL = float(args.step_turnover_cap_normal)
+    trading_env_module.STEP_TURNOVER_CAP_STRESS = float(args.step_turnover_cap_stress)
+    trading_env_module.STEP_TURNOVER_CAP_CRISIS = float(args.step_turnover_cap_crisis)
 
 
 def apply_realism_overrides(args: argparse.Namespace) -> None:
@@ -1670,6 +1691,10 @@ def run_backtest(
         "model_dir": str(model_dir),
         "post_policy_overlay": post_policy_overlay,
         "initial_capital": float(initial_capital),
+        "step_turnover_cap_enabled": bool(trading_env_module.STEP_TURNOVER_CAP_ENABLED),
+        "step_turnover_cap_normal": float(trading_env_module.STEP_TURNOVER_CAP_NORMAL),
+        "step_turnover_cap_stress": float(trading_env_module.STEP_TURNOVER_CAP_STRESS),
+        "step_turnover_cap_crisis": float(trading_env_module.STEP_TURNOVER_CAP_CRISIS),
     }
     return df, trades_count, meta
 
@@ -1941,6 +1966,10 @@ def main() -> None:
             "reversal_hysteresis_mult": args.reversal_hysteresis_mult,
             "position_reset_weight_threshold": args.position_reset_weight_threshold,
             "position_reset_persist_bars": args.position_reset_persist_bars,
+            "step_turnover_cap_enabled": args.step_turnover_cap_enabled,
+            "step_turnover_cap_normal": args.step_turnover_cap_normal,
+            "step_turnover_cap_stress": args.step_turnover_cap_stress,
+            "step_turnover_cap_crisis": args.step_turnover_cap_crisis,
         },
     )
     logger.info(f"Backtest session output directory -> {session_dir}")

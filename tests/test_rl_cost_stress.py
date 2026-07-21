@@ -37,7 +37,14 @@ class RLCostStressTest(unittest.TestCase):
     def test_backtest_command_includes_cost_overrides(self):
         profile = runner.CostProfile(label="stress", fee=0.003, slippage=0.004, latency_steps=2)
 
-        command = runner.build_backtest_command(models_dir=Path("models/seed_41"), profile=profile)
+        command = runner.build_backtest_command(
+            models_dir=Path("models/seed_41"),
+            profile=profile,
+            step_turnover_cap_enabled=True,
+            step_turnover_cap_normal=0.15,
+            step_turnover_cap_stress=0.10,
+            step_turnover_cap_crisis=0.06,
+        )
 
         self.assertEqual(command[0], sys.executable)
         self.assertIn("backtest.py", command)
@@ -47,6 +54,13 @@ class RLCostStressTest(unittest.TestCase):
         self.assertIn("0.004", command)
         self.assertIn("--latency-steps-override", command)
         self.assertIn("2", command)
+        self.assertIn("--step-turnover-cap-enabled", command)
+        self.assertIn("--step-turnover-cap-normal", command)
+        self.assertIn("0.15", command)
+        self.assertIn("--step-turnover-cap-stress", command)
+        self.assertIn("0.1", command)
+        self.assertIn("--step-turnover-cap-crisis", command)
+        self.assertIn("0.06", command)
 
     def test_run_cost_stress_dry_run_writes_commands_and_summary(self):
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -59,6 +73,10 @@ class RLCostStressTest(unittest.TestCase):
                 method="dynamic_weighted",
                 output_dir=out,
                 run_label="unit",
+                step_turnover_cap_enabled=False,
+                step_turnover_cap_normal=None,
+                step_turnover_cap_stress=None,
+                step_turnover_cap_crisis=None,
                 dry_run=True,
             )
             with patch.object(runner, "_current_git_commit", return_value="abc123"):
@@ -71,6 +89,7 @@ class RLCostStressTest(unittest.TestCase):
         self.assertEqual(summary["cost_profile"].tolist(), ["base"])
         self.assertIn("DRY RUN", stdout)
         self.assertIn("--fee-override", stdout)
+        self.assertIn("--no-step-turnover-cap-enabled", stdout)
 
 
 if __name__ == "__main__":

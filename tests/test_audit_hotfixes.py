@@ -210,6 +210,69 @@ class AuditHotfixTest(unittest.TestCase):
             trading_env.REWARD_ACTION_DELTA_DEADBAND = old_deadband
             trading_env.REWARD_ACTION_DELTA_SCALE = old_scale
 
+    def test_reward_penalty_constructor_overrides_do_not_mutate_global_defaults(self):
+        old_weight = trading_env.REWARD_ACTION_DELTA_WEIGHT
+        old_turnover = trading_env.REWARD_WEIGHTS["turnover"]
+        try:
+            trading_env.REWARD_ACTION_DELTA_WEIGHT = 0.10
+            trading_env.REWARD_WEIGHTS["turnover"] = 1.0
+            old_weights = np.array([0.1, 0.1, 0.8], dtype=np.float32)
+            new_weights = np.array([0.7, 0.1, 0.2], dtype=np.float32)
+            base_env = SpotPortfolioEnv(_sample_data(), lookback=30, mode="eval")
+            strict_env = SpotPortfolioEnv(
+                _sample_data(),
+                lookback=30,
+                mode="eval",
+                reward_turnover_weight=5.0,
+                reward_action_delta_weight=2.0,
+                reward_action_delta_deadband=0.0,
+                reward_action_delta_scale=1.0,
+            )
+
+            base_reward, _ = base_env._compute_reward(
+                net_return=1.0,
+                transaction_cost=0.01,
+                rolling_drawdown=0.0,
+                old_weights=old_weights,
+                new_weights=new_weights,
+            )
+            strict_reward, strict_components = strict_env._compute_reward(
+                net_return=1.0,
+                transaction_cost=0.01,
+                rolling_drawdown=0.0,
+                old_weights=old_weights,
+                new_weights=new_weights,
+            )
+
+            self.assertLess(strict_reward, base_reward)
+            self.assertAlmostEqual(strict_components["action_delta_component"], 0.6, places=6)
+            self.assertEqual(trading_env.REWARD_ACTION_DELTA_WEIGHT, 0.10)
+            self.assertEqual(trading_env.REWARD_WEIGHTS["turnover"], 1.0)
+        finally:
+            trading_env.REWARD_ACTION_DELTA_WEIGHT = old_weight
+            trading_env.REWARD_WEIGHTS["turnover"] = old_turnover
+
+    def test_step_turnover_cap_constructor_override_limits_rebalance(self):
+        old_enabled = trading_env.STEP_TURNOVER_CAP_ENABLED
+        try:
+            trading_env.STEP_TURNOVER_CAP_ENABLED = False
+            env = SpotPortfolioEnv(
+                _sample_data(),
+                lookback=30,
+                mode="eval",
+                step_turnover_cap_enabled=True,
+                step_turnover_cap_normal=0.15,
+            )
+            env._weights = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+            capped = env._apply_step_turnover_cap(np.array([0.6, 0.0, 0.4], dtype=np.float32))
+
+            self.assertTrue(env._last_turnover_cap_diag["applied"])
+            self.assertAlmostEqual(float(capped[0]), 0.15, places=6)
+            self.assertFalse(trading_env.STEP_TURNOVER_CAP_ENABLED)
+        finally:
+            trading_env.STEP_TURNOVER_CAP_ENABLED = old_enabled
+
     def test_stress_threshold_blocks_small_rebalance_even_above_normal_threshold(self):
         old_normal = trading_env.REBALANCE_THRESHOLD_NORMAL
         old_stress = trading_env.REBALANCE_THRESHOLD_STRESS

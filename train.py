@@ -15,6 +15,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -176,6 +177,7 @@ class RollingValidationCallback(BaseCallback):
         algo: str,
         eval_freq: int,
         cost_profiles: list[ValidationCostProfile] | None = None,
+        env_kwargs: dict[str, Any] | None = None,
         score_mode: str = "mean_reward",
         deterministic: bool = True,
         max_no_improvement_evals: int = 10,
@@ -188,6 +190,7 @@ class RollingValidationCallback(BaseCallback):
         self.algo = algo
         self.eval_freq = max(1, int(eval_freq))
         self.cost_profiles = cost_profiles or parse_validation_cost_profiles(None)
+        self.env_kwargs = dict(env_kwargs or {})
         self.score_mode = str(score_mode)
         self.deterministic = deterministic
         self.max_no_improvement_evals = int(max_no_improvement_evals)
@@ -208,12 +211,18 @@ class RollingValidationCallback(BaseCallback):
         profile_rewards: dict[str, list[float]] = {profile.label: [] for profile in self.cost_profiles}
         for profile in self.cost_profiles:
             for window_idx, window_data in enumerate(self.validation_windows, start=1):
+                env_kwargs = dict(self.env_kwargs)
+                env_kwargs.update(
+                    {
+                        "trading_fee": profile.fee,
+                        "slippage": profile.slippage,
+                    }
+                )
                 env = Monitor(
                     SpotPortfolioEnv(
                         window_data,
                         mode="eval",
-                        trading_fee=profile.fee,
-                        slippage=profile.slippage,
+                        **env_kwargs,
                     )
                 )
                 try:
@@ -394,6 +403,14 @@ def train_algo(
     validation_score_mode: str = "mean_reward",
     training_fee: float | None = None,
     training_slippage: float | None = None,
+    training_reward_turnover_weight: float | None = None,
+    training_reward_action_delta_weight: float | None = None,
+    training_reward_action_delta_deadband: float | None = None,
+    training_reward_action_delta_scale: float | None = None,
+    training_step_turnover_cap_enabled: bool | None = None,
+    training_step_turnover_cap_normal: float | None = None,
+    training_step_turnover_cap_stress: float | None = None,
+    training_step_turnover_cap_crisis: float | None = None,
     progress_bar: bool = False,
 ):
     """Train a single algorithm and save the best model."""
@@ -416,6 +433,22 @@ def train_algo(
             env_kwargs["trading_fee"] = float(training_fee)
         if training_slippage is not None:
             env_kwargs["slippage"] = float(training_slippage)
+        if training_reward_turnover_weight is not None:
+            env_kwargs["reward_turnover_weight"] = float(training_reward_turnover_weight)
+        if training_reward_action_delta_weight is not None:
+            env_kwargs["reward_action_delta_weight"] = float(training_reward_action_delta_weight)
+        if training_reward_action_delta_deadband is not None:
+            env_kwargs["reward_action_delta_deadband"] = float(training_reward_action_delta_deadband)
+        if training_reward_action_delta_scale is not None:
+            env_kwargs["reward_action_delta_scale"] = float(training_reward_action_delta_scale)
+        if training_step_turnover_cap_enabled is not None:
+            env_kwargs["step_turnover_cap_enabled"] = bool(training_step_turnover_cap_enabled)
+        if training_step_turnover_cap_normal is not None:
+            env_kwargs["step_turnover_cap_normal"] = float(training_step_turnover_cap_normal)
+        if training_step_turnover_cap_stress is not None:
+            env_kwargs["step_turnover_cap_stress"] = float(training_step_turnover_cap_stress)
+        if training_step_turnover_cap_crisis is not None:
+            env_kwargs["step_turnover_cap_crisis"] = float(training_step_turnover_cap_crisis)
         env = SpotPortfolioEnv(train_data, mode="train", **env_kwargs)
         return Monitor(env, str(LOGS_DIR / algo))
 
@@ -451,6 +484,20 @@ def train_algo(
             algo=algo,
             eval_freq=max(1, checkpoint_freq // n_envs),
             cost_profiles=validation_cost_profiles,
+            env_kwargs={
+                key: value
+                for key, value in {
+                    "reward_turnover_weight": training_reward_turnover_weight,
+                    "reward_action_delta_weight": training_reward_action_delta_weight,
+                    "reward_action_delta_deadband": training_reward_action_delta_deadband,
+                    "reward_action_delta_scale": training_reward_action_delta_scale,
+                    "step_turnover_cap_enabled": training_step_turnover_cap_enabled,
+                    "step_turnover_cap_normal": training_step_turnover_cap_normal,
+                    "step_turnover_cap_stress": training_step_turnover_cap_stress,
+                    "step_turnover_cap_crisis": training_step_turnover_cap_crisis,
+                }.items()
+                if value is not None
+            },
             score_mode=validation_score_mode,
             deterministic=True,
             max_no_improvement_evals=10,
@@ -569,6 +616,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the training environment slippage.",
     )
     parser.add_argument(
+        "--training-reward-turnover-weight",
+        type=float,
+        default=None,
+        help="Override the training and rolling-validation reward turnover weight.",
+    )
+    parser.add_argument(
+        "--training-reward-action-delta-weight",
+        type=float,
+        default=None,
+        help="Override the training and rolling-validation action-delta penalty weight.",
+    )
+    parser.add_argument(
+        "--training-reward-action-delta-deadband",
+        type=float,
+        default=None,
+        help="Override the action-delta reward deadband.",
+    )
+    parser.add_argument(
+        "--training-reward-action-delta-scale",
+        type=float,
+        default=None,
+        help="Override the action-delta reward scale.",
+    )
+    parser.add_argument(
+        "--training-step-turnover-cap",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable a per-step turnover cap in training and rolling validation.",
+    )
+    parser.add_argument(
+        "--training-step-turnover-cap-normal",
+        type=float,
+        default=None,
+        help="Training per-step turnover cap in normal regimes.",
+    )
+    parser.add_argument(
+        "--training-step-turnover-cap-stress",
+        type=float,
+        default=None,
+        help="Training per-step turnover cap in stress regimes.",
+    )
+    parser.add_argument(
+        "--training-step-turnover-cap-crisis",
+        type=float,
+        default=None,
+        help="Training per-step turnover cap in crisis regimes.",
+    )
+    parser.add_argument(
         "--require-gpu",
         action="store_true",
         default=REQUIRE_GPU_FOR_TRAINING,
@@ -629,7 +724,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_post_training_backtest_command(args: argparse.Namespace) -> list[str]:
-    return [
+    command = [
         "backtest.py",
         "--pipeline",
         args.post_backtest_pipeline,
@@ -640,6 +735,19 @@ def build_post_training_backtest_command(args: argparse.Namespace) -> list[str]:
         "--model-dir",
         str(args.models_dir),
     ]
+    if getattr(args, "training_step_turnover_cap", None) is True:
+        command.append("--step-turnover-cap-enabled")
+    elif getattr(args, "training_step_turnover_cap", None) is False:
+        command.append("--no-step-turnover-cap-enabled")
+    for flag, attr in [
+        ("--step-turnover-cap-normal", "training_step_turnover_cap_normal"),
+        ("--step-turnover-cap-stress", "training_step_turnover_cap_stress"),
+        ("--step-turnover-cap-crisis", "training_step_turnover_cap_crisis"),
+    ]:
+        value = getattr(args, attr, None)
+        if value is not None:
+            command.extend([flag, str(value)])
+    return command
 
 
 def run_post_training_backtest(args: argparse.Namespace) -> None:
@@ -659,6 +767,19 @@ def main():
         raise ValueError("--training-fee must be non-negative")
     if args.training_slippage is not None and args.training_slippage < 0:
         raise ValueError("--training-slippage must be non-negative")
+    non_negative_options = [
+        "training_reward_turnover_weight",
+        "training_reward_action_delta_weight",
+        "training_reward_action_delta_deadband",
+        "training_reward_action_delta_scale",
+        "training_step_turnover_cap_normal",
+        "training_step_turnover_cap_stress",
+        "training_step_turnover_cap_crisis",
+    ]
+    for option in non_negative_options:
+        value = getattr(args, option)
+        if value is not None and value < 0:
+            raise ValueError(f"--{option.replace('_', '-')} must be non-negative")
     logger.info(f"Training device resolved to: {device}")
 
     algos = ALGORITHMS if args.algo == "ALL" else [args.algo]
@@ -682,6 +803,14 @@ def main():
             validation_score_mode=args.validation_score_mode,
             training_fee=args.training_fee,
             training_slippage=args.training_slippage,
+            training_reward_turnover_weight=args.training_reward_turnover_weight,
+            training_reward_action_delta_weight=args.training_reward_action_delta_weight,
+            training_reward_action_delta_deadband=args.training_reward_action_delta_deadband,
+            training_reward_action_delta_scale=args.training_reward_action_delta_scale,
+            training_step_turnover_cap_enabled=args.training_step_turnover_cap,
+            training_step_turnover_cap_normal=args.training_step_turnover_cap_normal,
+            training_step_turnover_cap_stress=args.training_step_turnover_cap_stress,
+            training_step_turnover_cap_crisis=args.training_step_turnover_cap_crisis,
             progress_bar=args.progress_bar,
         )
 

@@ -9,6 +9,7 @@ from backtest import (
     REALISM,
     TRADE_PROFILES,
     append_backtest_trial_registry,
+    apply_execution_control_overrides,
     apply_realism_overrides,
     apply_trade_profile_overrides,
     build_block_bootstrap_statistical_report,
@@ -27,6 +28,7 @@ from backtest import (
     write_backtest_statistical_report,
     write_trade_decision_log,
 )
+import environment.trading_env as trading_env
 
 
 class BacktestSessionOutputsTest(unittest.TestCase):
@@ -65,6 +67,26 @@ class BacktestSessionOutputsTest(unittest.TestCase):
         self.assertEqual(args.trade_profile, "aggressive")
         self.assertEqual(args.position_cap_mode, "smooth_nav")
 
+    def test_build_arg_parser_accepts_step_turnover_cap_overrides(self):
+        parser = build_arg_parser()
+
+        args = parser.parse_args(
+            [
+                "--step-turnover-cap-enabled",
+                "--step-turnover-cap-normal",
+                "0.15",
+                "--step-turnover-cap-stress",
+                "0.10",
+                "--step-turnover-cap-crisis",
+                "0.06",
+            ]
+        )
+
+        self.assertTrue(args.step_turnover_cap_enabled)
+        self.assertEqual(args.step_turnover_cap_normal, 0.15)
+        self.assertEqual(args.step_turnover_cap_stress, 0.10)
+        self.assertEqual(args.step_turnover_cap_crisis, 0.06)
+
     def test_build_arg_parser_accepts_june_plunge_replay_window(self):
         parser = build_arg_parser()
 
@@ -82,6 +104,36 @@ class BacktestSessionOutputsTest(unittest.TestCase):
         self.assertEqual(args.rebalance_threshold_stress, TRADE_PROFILES["moderate"]["rebalance_threshold_stress"])
         self.assertEqual(args.rebalance_threshold_crisis, TRADE_PROFILES["moderate"]["rebalance_threshold_crisis"])
         self.assertEqual(args.material_trade_threshold, TRADE_PROFILES["moderate"]["material_trade_threshold"])
+
+    def test_apply_execution_control_overrides_sets_step_turnover_cap(self):
+        parser = build_arg_parser()
+        args = parser.parse_args(
+            [
+                "--step-turnover-cap-enabled",
+                "--step-turnover-cap-normal",
+                "0.15",
+                "--step-turnover-cap-stress",
+                "0.10",
+                "--step-turnover-cap-crisis",
+                "0.06",
+            ]
+        )
+        old_enabled = trading_env.STEP_TURNOVER_CAP_ENABLED
+        old_normal = trading_env.STEP_TURNOVER_CAP_NORMAL
+        old_stress = trading_env.STEP_TURNOVER_CAP_STRESS
+        old_crisis = trading_env.STEP_TURNOVER_CAP_CRISIS
+        try:
+            apply_execution_control_overrides(args)
+
+            self.assertTrue(trading_env.STEP_TURNOVER_CAP_ENABLED)
+            self.assertEqual(trading_env.STEP_TURNOVER_CAP_NORMAL, 0.15)
+            self.assertEqual(trading_env.STEP_TURNOVER_CAP_STRESS, 0.10)
+            self.assertEqual(trading_env.STEP_TURNOVER_CAP_CRISIS, 0.06)
+        finally:
+            trading_env.STEP_TURNOVER_CAP_ENABLED = old_enabled
+            trading_env.STEP_TURNOVER_CAP_NORMAL = old_normal
+            trading_env.STEP_TURNOVER_CAP_STRESS = old_stress
+            trading_env.STEP_TURNOVER_CAP_CRISIS = old_crisis
 
     def test_apply_realism_overrides_updates_selected_profile_only(self):
         parser = build_arg_parser()

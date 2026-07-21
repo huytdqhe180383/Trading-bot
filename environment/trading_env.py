@@ -101,6 +101,14 @@ class SpotPortfolioEnv(gym.Env):
         slippage: float = SLIPPAGE,
         lookback: int = LOOKBACK_WINDOW,
         mode: str = "train",   # "train" | "eval"
+        reward_turnover_weight: float | None = None,
+        reward_action_delta_weight: float | None = None,
+        reward_action_delta_deadband: float | None = None,
+        reward_action_delta_scale: float | None = None,
+        step_turnover_cap_enabled: bool | None = None,
+        step_turnover_cap_normal: float | None = None,
+        step_turnover_cap_stress: float | None = None,
+        step_turnover_cap_crisis: float | None = None,
     ):
         super().__init__()
 
@@ -111,6 +119,46 @@ class SpotPortfolioEnv(gym.Env):
         self.slippage    = slippage
         self.lookback    = lookback
         self.mode        = mode
+        self._reward_weights = dict(REWARD_WEIGHTS)
+        if reward_turnover_weight is not None:
+            if reward_turnover_weight < 0:
+                raise ValueError("reward_turnover_weight must be non-negative")
+            self._reward_weights["turnover"] = float(reward_turnover_weight)
+        self._reward_action_delta_weight = self._non_negative_override(
+            "reward_action_delta_weight",
+            reward_action_delta_weight,
+            REWARD_ACTION_DELTA_WEIGHT,
+        )
+        self._reward_action_delta_deadband = self._non_negative_override(
+            "reward_action_delta_deadband",
+            reward_action_delta_deadband,
+            REWARD_ACTION_DELTA_DEADBAND,
+        )
+        self._reward_action_delta_scale = self._non_negative_override(
+            "reward_action_delta_scale",
+            reward_action_delta_scale,
+            REWARD_ACTION_DELTA_SCALE,
+        )
+        self._step_turnover_cap_enabled = (
+            bool(STEP_TURNOVER_CAP_ENABLED)
+            if step_turnover_cap_enabled is None
+            else bool(step_turnover_cap_enabled)
+        )
+        self._step_turnover_cap_normal = self._non_negative_override(
+            "step_turnover_cap_normal",
+            step_turnover_cap_normal,
+            STEP_TURNOVER_CAP_NORMAL,
+        )
+        self._step_turnover_cap_stress = self._non_negative_override(
+            "step_turnover_cap_stress",
+            step_turnover_cap_stress,
+            STEP_TURNOVER_CAP_STRESS,
+        )
+        self._step_turnover_cap_crisis = self._non_negative_override(
+            "step_turnover_cap_crisis",
+            step_turnover_cap_crisis,
+            STEP_TURNOVER_CAP_CRISIS,
+        )
 
         # â”€â”€ Align dataframes to a common index â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         self._frames: dict[str, pd.DataFrame] = data
@@ -163,6 +211,13 @@ class SpotPortfolioEnv(gym.Env):
         )
 
         self._reset_state()
+
+    @staticmethod
+    def _non_negative_override(name: str, value: float | None, default: float) -> float:
+        resolved = float(default if value is None else value)
+        if resolved < 0:
+            raise ValueError(f"{name} must be non-negative")
+        return resolved
 
     def get_market_regime(self) -> dict:
         """Return the current market regime metrics for the IMCA ensemble agent."""
@@ -541,14 +596,14 @@ class SpotPortfolioEnv(gym.Env):
         return governed.astype(np.float32)
 
     def _turnover_cap_limit(self) -> float:
-        if not STEP_TURNOVER_CAP_ENABLED:
+        if not self._step_turnover_cap_enabled:
             return 0.0
         reason = str(self._last_risk_governor_diag.get("reason", ""))
         if "crisis_drawdown" in reason:
-            return float(STEP_TURNOVER_CAP_CRISIS)
+            return float(self._step_turnover_cap_crisis)
         if bool(self._last_risk_governor_diag.get("active", False)):
-            return float(STEP_TURNOVER_CAP_STRESS)
-        return float(STEP_TURNOVER_CAP_NORMAL)
+            return float(self._step_turnover_cap_stress)
+        return float(self._step_turnover_cap_normal)
 
     def _apply_step_turnover_cap(self, target_weights: np.ndarray) -> np.ndarray:
         limit = self._turnover_cap_limit()
@@ -592,7 +647,7 @@ class SpotPortfolioEnv(gym.Env):
         raw_action_delta = float(np.abs(new_weights[:-1] - old_weights[:-1]).sum())
         effective_action_delta = max(
             0.0,
-            (raw_action_delta - float(REWARD_ACTION_DELTA_DEADBAND)) * float(REWARD_ACTION_DELTA_SCALE),
+            (raw_action_delta - float(self._reward_action_delta_deadband)) * float(self._reward_action_delta_scale),
         )
 
         tail_loss_t = 0.0
@@ -611,12 +666,12 @@ class SpotPortfolioEnv(gym.Env):
             opportunity_cost = (cash_weight - 0.5) * macro_dist * 5.0
 
         reward = (
-            (float(REWARD_WEIGHTS.get("profit", 1.0)) * profit_t)
-            - (float(REWARD_WEIGHTS.get("drawdown", 0.0)) * drawdown_t)
-            - (float(REWARD_WEIGHTS.get("turnover", 0.0)) * turnover_t)
-            - (float(REWARD_ACTION_DELTA_WEIGHT) * effective_action_delta)
-            - (float(REWARD_WEIGHTS.get("missed_opportunity", 0.0)) * opportunity_cost)
-            - (float(REWARD_WEIGHTS.get("tail_loss", 0.0)) * tail_loss_t)
+            (float(self._reward_weights.get("profit", 1.0)) * profit_t)
+            - (float(self._reward_weights.get("drawdown", 0.0)) * drawdown_t)
+            - (float(self._reward_weights.get("turnover", 0.0)) * turnover_t)
+            - (float(self._reward_action_delta_weight) * effective_action_delta)
+            - (float(self._reward_weights.get("missed_opportunity", 0.0)) * opportunity_cost)
+            - (float(self._reward_weights.get("tail_loss", 0.0)) * tail_loss_t)
         )
         components = {
             "raw_log_return": raw_log_return,
