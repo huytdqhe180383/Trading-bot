@@ -91,6 +91,21 @@ class RLCostStressTest(unittest.TestCase):
         self.assertIn("--fee-override", stdout)
         self.assertIn("--no-step-turnover-cap-enabled", stdout)
 
+    def test_parse_backtest_session_dir_strips_ansi_codes(self):
+        with tempfile.TemporaryDirectory() as tmp_name:
+            base = Path(tmp_name)
+            stdout = base / "stdout.log"
+            stderr = base / "stderr.log"
+            stdout.write_text(
+                "Backtest session output directory -> K:\\BTC-ETH Trading\\results\\daily\\2026-07-22\\24\x1b[0m\n",
+                encoding="utf-8",
+            )
+            stderr.write_text("", encoding="utf-8")
+
+            parsed = runner.parse_backtest_session_dir(stdout_path=stdout, stderr_path=stderr)
+
+        self.assertEqual(str(parsed), "K:\\BTC-ETH Trading\\results\\daily\\2026-07-22\\24")
+
 
 if __name__ == "__main__":
     unittest.main()

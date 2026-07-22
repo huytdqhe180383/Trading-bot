@@ -26,6 +26,7 @@ DEFAULT_SEEDS = (41, 42, 43)
 DEFAULT_PIPELINE = "rl_only"
 DEFAULT_REALISM_PROFILE = "live_like"
 DEFAULT_METHOD = "dynamic_weighted"
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -153,6 +154,7 @@ def parse_backtest_session_dir(*, stdout_path: Path, stderr_path: Path) -> Path:
     for path in (stdout_path, stderr_path):
         if path.exists():
             text += "\n" + path.read_text(encoding="utf-8", errors="replace")
+    text = ANSI_ESCAPE_RE.sub("", text)
     match = re.search(r"Backtest session output directory -> (?P<path>.+)", text)
     if not match:
         raise RuntimeError(f"Could not parse backtest session directory from {stdout_path} / {stderr_path}")

@@ -52,7 +52,7 @@ class RLSeedScreenTest(unittest.TestCase):
             stderr = base / "stderr.log"
             stdout.write_text("", encoding="utf-8")
             stderr.write_text(
-                "2026-07-22 | INFO | Backtest session output directory -> K:\\BTC-ETH Trading\\results\\daily\\2026-07-22\\9\n",
+                "2026-07-22 | INFO | Backtest session output directory -> K:\\BTC-ETH Trading\\results\\daily\\2026-07-22\\9\x1b[0m\n",
                 encoding="utf-8",
             )
 
