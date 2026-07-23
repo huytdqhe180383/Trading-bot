@@ -241,6 +241,74 @@ class RLEvidenceTest(unittest.TestCase):
         self.assertEqual(evidence["reasons"], [])
         self.assertNotIn("target_weights", evidence["provenance"]["promotion_gate_provenance"])
 
+    def test_build_from_promotion_gate_includes_statistical_report_and_auto_passes_stat_gate(self):
+        with TemporaryDirectory() as tmp_name:
+            base = Path(tmp_name)
+            gate_path = base / "promotion_gate_report.json"
+            stats_path = base / "rl_statistical_report.json"
+            now = datetime(2026, 7, 23, tzinfo=timezone.utc)
+            gate_path.write_text(
+                json.dumps(
+                    {
+                        "candidate_label": "promoted_candidate",
+                        "status": "PROMOTED",
+                        "llm_evidence_status": "VERIFIED",
+                        "blocking_failures": [],
+                        "aggregate": {"seed_count": 10, "profiles": {}},
+                        "provenance": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stats_path.write_text(
+                json.dumps(
+                    {
+                        "status": "PASSED",
+                        "statistical_gates_passed": True,
+                        "method": "nonparametric_seed_bootstrap",
+                        "blocking_failures": [],
+                        "profiles": {
+                            "live_like_3x": {
+                                "seed_count": 10,
+                                "metrics": {
+                                    "total_return_pct": {
+                                        "observed": {"min": 1.0},
+                                        "bootstrap_mean_ci": {"p2_5": 1.1, "median": 2.0, "p97_5": 3.0},
+                                        "bootstrap_threshold_probabilities": {"0.0": 1.0},
+                                    }
+                                },
+                            }
+                        },
+                        "selection_bias": {
+                            "deflated_sharpe_available": True,
+                            "deflated_sharpe_probability": 0.97,
+                            "backtest_overfit_probability_available": True,
+                            "backtest_overfit_probability": 0.08,
+                        },
+                        "gate_status": {"statistical_gates_passed": True},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            evidence = build_evidence_from_promotion_gate(
+                promotion_gate_path=gate_path,
+                statistical_report_path=stats_path,
+                now=now,
+                promoted=True,
+                promotion_expires_utc=(now + timedelta(days=7)).isoformat(),
+                causal_integrity_passed=True,
+                calibration_passed=True,
+                prospective_shadow_passed=True,
+            )
+
+        self.assertEqual(evidence["status"], "VERIFIED")
+        self.assertNotIn("statistical_gates_missing", evidence["reasons"])
+        self.assertTrue(evidence["uncertainty"]["bootstrap_interval_available"])
+        self.assertTrue(evidence["uncertainty"]["dsr_available"])
+        self.assertTrue(evidence["uncertainty"]["pbo_available"])
+        self.assertIn("statistical_report_sha256", evidence["provenance"])
+
 
 if __name__ == "__main__":
     unittest.main()

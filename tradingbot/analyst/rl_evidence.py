@@ -322,6 +322,7 @@ def _public_uncertainty(statistical_report: dict[str, Any]) -> dict[str, Any]:
 def build_evidence_from_promotion_gate(
     *,
     promotion_gate_path: Path,
+    statistical_report_path: Path | None = None,
     output_path: Path | None = None,
     now: datetime | None = None,
     promoted: bool = False,
@@ -342,13 +343,17 @@ def build_evidence_from_promotion_gate(
     current = now or datetime.now(timezone.utc)
     gate_file = Path(promotion_gate_path)
     report = _read_json_file(gate_file)
+    statistical_report = _read_json_file(statistical_report_path) if statistical_report_path else {}
+    effective_statistical_gates_passed = (
+        statistical_gates_passed or _statistical_report_gates_passed(statistical_report)
+    )
     reasons = _promotion_gate_report_reasons(report)
     reasons.extend(
         _gate_reasons(
             promoted=promoted,
             promotion_expires_utc=promotion_expires_utc,
             causal_integrity_passed=causal_integrity_passed,
-            statistical_gates_passed=statistical_gates_passed,
+            statistical_gates_passed=effective_statistical_gates_passed,
             calibration_passed=calibration_passed,
             prospective_shadow_passed=prospective_shadow_passed,
             now=current,
@@ -369,13 +374,18 @@ def build_evidence_from_promotion_gate(
         "promotion_gate_llm_evidence_status": report.get("llm_evidence_status", "missing"),
         "promotion_gate_blocking_failures": report.get("blocking_failures", []),
         "promotion_gate_provenance": report.get("provenance", {}),
+        "statistical_report_path": str(statistical_report_path) if statistical_report_path else "",
+        "statistical_report_sha256": _sha256_file(Path(statistical_report_path))
+        if statistical_report_path and Path(statistical_report_path).exists()
+        else "",
+        "statistical_report_status": statistical_report.get("status", "missing"),
         "promotion_expires_utc": promotion_expires_utc,
         "gates": {
             "promoted": promoted,
             "promotion_gate_promoted": str(report.get("status", "")).upper() == "PROMOTED",
             "promotion_gate_llm_evidence_verified": str(report.get("llm_evidence_status", "")).upper() == "VERIFIED",
             "causal_integrity_passed": causal_integrity_passed,
-            "statistical_gates_passed": statistical_gates_passed,
+            "statistical_gates_passed": effective_statistical_gates_passed,
             "calibration_passed": calibration_passed,
             "prospective_shadow_passed": prospective_shadow_passed,
         },
@@ -387,7 +397,7 @@ def build_evidence_from_promotion_gate(
         summary=summary,
         reasons=reasons,
         metrics=_public_promotion_gate_metrics(report),
-        uncertainty=_public_promotion_gate_uncertainty(report),
+        uncertainty=_public_promotion_gate_uncertainty(report, statistical_report),
         calibration={
             "conformal_interval_available": False,
             "trailing_coverage_available": False,
@@ -417,6 +427,17 @@ def _promotion_gate_report_reasons(report: dict[str, Any]) -> list[str]:
     return reasons
 
 
+def _statistical_report_gates_passed(report: dict[str, Any]) -> bool:
+    if not report:
+        return False
+    if bool(report.get("statistical_gates_passed")):
+        return True
+    gate_status = report.get("gate_status", {})
+    if isinstance(gate_status, dict) and bool(gate_status.get("statistical_gates_passed")):
+        return True
+    return str(report.get("status", "")).upper() == "PASSED"
+
+
 def _public_promotion_gate_metrics(report: dict[str, Any]) -> dict[str, float | str | None]:
     aggregate = report.get("aggregate", {}) if isinstance(report, dict) else {}
     profiles = aggregate.get("profiles", {}) if isinstance(aggregate, dict) else {}
@@ -444,10 +465,17 @@ def _public_promotion_gate_metrics(report: dict[str, Any]) -> dict[str, float | 
     return {key: value for key, value in metrics.items() if value is not None and value != ""}
 
 
-def _public_promotion_gate_uncertainty(report: dict[str, Any]) -> dict[str, Any]:
+def _public_promotion_gate_uncertainty(
+    report: dict[str, Any],
+    statistical_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     diagnostics = report.get("validation_diagnostics", {}) if isinstance(report, dict) else {}
     aggregate = report.get("aggregate", {}) if isinstance(report, dict) else {}
-    return {
+    statistical_report = statistical_report or {}
+    statistical_profiles = statistical_report.get("profiles", {}) if isinstance(statistical_report, dict) else {}
+    selection_bias = statistical_report.get("selection_bias", {}) if isinstance(statistical_report, dict) else {}
+    statistical_gate_status = statistical_report.get("gate_status", {}) if isinstance(statistical_report, dict) else {}
+    uncertainty = {
         "bootstrap_interval_available": False,
         "pbo_available": False,
         "dsr_available": False,
@@ -461,6 +489,86 @@ def _public_promotion_gate_uncertainty(report: dict[str, Any]) -> dict[str, Any]
         "validation_diagnostics": diagnostics if isinstance(diagnostics, dict) else {},
         "caveat": "Aggregate historical promotion diagnostics do not make RL agent-trustworthy without causal, statistical, calibration, and prospective-shadow gates.",
     }
+    if statistical_report:
+        uncertainty.update(
+            {
+                "bootstrap_interval_available": _statistical_bootstrap_available(statistical_profiles),
+                "pbo_available": bool(selection_bias.get("backtest_overfit_probability_available")),
+                "dsr_available": bool(selection_bias.get("deflated_sharpe_available")),
+                "probability_of_improvement_available": False,
+                "threshold_probability_available": _statistical_probability_available(statistical_profiles),
+                "method": statistical_report.get("method", ""),
+                "statistical_gate_status": statistical_gate_status if isinstance(statistical_gate_status, dict) else {},
+                "statistical_blocking_failures": statistical_report.get("blocking_failures", []),
+                "statistical_profiles": _public_statistical_profiles(statistical_profiles),
+                "selection_bias": {
+                    "deflated_sharpe_probability": selection_bias.get("deflated_sharpe_probability"),
+                    "deflated_sharpe_available": selection_bias.get("deflated_sharpe_available"),
+                    "backtest_overfit_probability": selection_bias.get("backtest_overfit_probability"),
+                    "backtest_overfit_probability_available": selection_bias.get(
+                        "backtest_overfit_probability_available"
+                    ),
+                },
+            }
+        )
+    return uncertainty
+
+
+def _statistical_bootstrap_available(profiles: Any) -> bool:
+    if not isinstance(profiles, dict):
+        return False
+    for profile_data in profiles.values():
+        if not isinstance(profile_data, dict):
+            continue
+        metrics = profile_data.get("metrics", {})
+        if not isinstance(metrics, dict):
+            continue
+        for metric_data in metrics.values():
+            if isinstance(metric_data, dict) and metric_data.get("bootstrap_mean_ci"):
+                return True
+    return False
+
+
+def _statistical_probability_available(profiles: Any) -> bool:
+    if not isinstance(profiles, dict):
+        return False
+    for profile_data in profiles.values():
+        if not isinstance(profile_data, dict):
+            continue
+        metrics = profile_data.get("metrics", {})
+        if not isinstance(metrics, dict):
+            continue
+        for metric_data in metrics.values():
+            probabilities = metric_data.get("bootstrap_threshold_probabilities") if isinstance(metric_data, dict) else {}
+            if isinstance(probabilities, dict) and probabilities:
+                return True
+    return False
+
+
+def _public_statistical_profiles(profiles: Any) -> dict[str, Any]:
+    if not isinstance(profiles, dict):
+        return {}
+    public: dict[str, Any] = {}
+    for profile, profile_data in profiles.items():
+        if not isinstance(profile_data, dict):
+            continue
+        metrics = profile_data.get("metrics", {})
+        if not isinstance(metrics, dict):
+            continue
+        public_metrics: dict[str, Any] = {}
+        for metric_name, metric_data in metrics.items():
+            if not isinstance(metric_data, dict):
+                continue
+            public_metrics[str(metric_name)] = {
+                "observed": metric_data.get("observed", {}),
+                "bootstrap_mean_ci": metric_data.get("bootstrap_mean_ci", {}),
+                "bootstrap_threshold_probabilities": metric_data.get("bootstrap_threshold_probabilities", {}),
+            }
+        public[str(profile)] = {
+            "seed_count": profile_data.get("seed_count"),
+            "metrics": public_metrics,
+        }
+    return public
 
 
 def _profile_stat(profiles: dict[str, Any], profile: str, metric: str, statistic: str) -> float | str | None:

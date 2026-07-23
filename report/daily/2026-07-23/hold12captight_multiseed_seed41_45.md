@@ -48,6 +48,8 @@ Aggregate artifacts:
 - Cost-stress by seed: `../../../results/daily/2026-07-23/rl_promotion_gate/hold12captight_seed41_45_1/cost_stress_by_seed.csv`
 - Promotion gate report: `../../../results/daily/2026-07-23/rl_promotion_gate/hold12captight_seed41_45_1/promotion_gate_report.json`
 - Promotion gate summary: `../../../results/daily/2026-07-23/rl_promotion_gate/hold12captight_seed41_45_1/promotion_gate_summary.csv`
+- Statistical gate report: `../../../results/daily/2026-07-23/rl_statistical_gates/hold12captight_seed41_45_1/rl_statistical_report.json`
+- Statistical gate summary: `../../../results/daily/2026-07-23/rl_statistical_gates/hold12captight_seed41_45_1/statistical_gate_summary.csv`
 - Validation summary: `../../../results/daily/2026-07-23/hold12captight_multiseed_seed41_45_1/validation_selection_summary.csv`
 - Aggregate candidate evidence envelope: `../../../results/daily/2026-07-23/rl_candidate_evidence/hold12captight_seed41_45_1/rl_evidence.json`
 
@@ -142,6 +144,27 @@ It contains the five-seed aggregate metrics that would be useful to an analyst, 
 
 This is now the correct candidate handoff shape for the LLM path: one sanitized aggregate envelope, still non-executable, still fail-closed, and ready to become the configured analyst evidence path only after the missing gates are actually passed.
 
+## Statistical-gate follow-up
+
+Follow-up implementation added `scripts/evaluate_rl_statistical_gates.py`.
+
+The generated statistical report is preserved at `../../../results/daily/2026-07-23/rl_statistical_gates/hold12captight_seed41_45_1/rl_statistical_report.json`.
+
+Result:
+
+- statistical gate status: `FAILED`
+- passed: seed-bootstrap return/Sharpe/drawdown threshold probabilities for both 2x and 3x profiles
+- failed: `min_statistical_seed_count`, `deflated_sharpe_probability`, `backtest_overfit_probability`
+
+Useful diagnostics from the report:
+
+- Severe 3x bootstrap mean return CI: `2.2213%` / `3.4357%` / `4.6501%` (`p2.5` / median / `p97.5`)
+- Severe 3x bootstrap mean Sharpe CI: `0.0836` / `0.1265` / `0.1694`
+- Severe 3x threshold probability for mean return `>= 0`: `1.0`
+- Severe 3x threshold probability for mean Sharpe `>= 0`: `1.0`
+
+This strengthens the research case for the candidate but does not clear the LLM evidence gate. The statistical evaluator intentionally does not fabricate DSR/PBO; those must come from a trial-registry/CSCV workflow.
+
 ## Lessons for implementation
 
 1. Training/live execution parity mattered more than another reward tweak.
@@ -172,9 +195,9 @@ Passed:
 - Seeds `41` through `45` completed 1x/2x/3x cost-stress evaluation.
 - Seed `41` cost stress was refreshed under the current evidence-generation commit.
 - The aggregate promotion gate completed and failed closed only on LLM evidence gates.
-- The aggregate candidate evidence envelope was generated and confirmed to emit `ABSTAIN`.
-- Focused regression pack passed: `tests/test_rl_evidence.py tests/test_rl_promotion_gate.py tests/test_rl_cost_stress.py tests/test_trading_env_reward_controls.py tests/test_train_hygiene.py` (`32 passed`).
-- Analyst service regression passed: `tests/test_analyst_service.py` (`11 passed`).
+- The statistical gate report was generated and failed closed on missing 10-seed/DSR/PBO evidence.
+- The aggregate candidate evidence envelope was regenerated with statistical diagnostics and confirmed to emit `ABSTAIN`.
+- Focused regression pack passed: `tests/test_rl_evidence.py tests/test_rl_statistical_gates.py tests/test_rl_promotion_gate.py tests/test_rl_cost_stress.py tests/test_trading_env_reward_controls.py tests/test_train_hygiene.py tests/test_analyst_service.py` (`46 passed`).
 - Report links resolve to canonical `results/daily/2026-07-23/` artifacts.
 - Quick sensitive-string scan found no matches in this report and the referenced aggregate/promotion artifacts.
 

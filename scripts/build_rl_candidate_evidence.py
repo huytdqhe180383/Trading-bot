@@ -16,6 +16,7 @@ from tradingbot.analyst.rl_evidence import build_evidence_from_promotion_gate
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build fail-closed aggregate RL evidence for analyst LLM context.")
     parser.add_argument("--promotion-gate-report", type=Path, required=True)
+    parser.add_argument("--statistical-report-path", type=Path, default=None)
     parser.add_argument("--output-path", type=Path, required=True)
     parser.add_argument("--horizon", default="historical_multiseed_backtest")
     parser.add_argument("--promoted", action="store_true")
@@ -31,6 +32,7 @@ def main() -> None:
     args = build_parser().parse_args()
     envelope = build_evidence_from_promotion_gate(
         promotion_gate_path=args.promotion_gate_report,
+        statistical_report_path=args.statistical_report_path,
         output_path=args.output_path,
         promoted=args.promoted,
         promotion_expires_utc=args.promotion_expires_utc,
@@ -45,4 +47,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
