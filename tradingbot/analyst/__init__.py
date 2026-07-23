@@ -12,7 +12,7 @@ from .llm import (
     OpenAICompatibleLLMClient,
 )
 from .models import AnalystEvent, AnalystStatus, validate_analyst_payload
-from .rl_evidence import RLEvidenceEnvelope, load_rl_evidence
+from .rl_evidence import RLEvidenceEnvelope, build_evidence_from_promotion_gate, load_rl_evidence
 from .service import AnalystService, create_default_analyst_service
 
 __all__ = [
@@ -25,6 +25,7 @@ __all__ = [
     "LLMProviderError",
     "OpenAICompatibleLLMClient",
     "RLEvidenceEnvelope",
+    "build_evidence_from_promotion_gate",
     "create_default_analyst_service",
     "load_rl_evidence",
     "validate_analyst_payload",

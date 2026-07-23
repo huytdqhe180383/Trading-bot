@@ -319,6 +319,162 @@ def _public_uncertainty(statistical_report: dict[str, Any]) -> dict[str, Any]:
     return uncertainty
 
 
+def build_evidence_from_promotion_gate(
+    *,
+    promotion_gate_path: Path,
+    output_path: Path | None = None,
+    now: datetime | None = None,
+    promoted: bool = False,
+    promotion_expires_utc: str = "",
+    causal_integrity_passed: bool = False,
+    statistical_gates_passed: bool = False,
+    calibration_passed: bool = False,
+    prospective_shadow_passed: bool = False,
+    horizon: str = "historical_multiseed_backtest",
+) -> dict[str, Any]:
+    """Build a single analyst-safe evidence envelope from a promotion-gate report.
+
+    This is the aggregate handoff artifact intended for LLM analyst context. It
+    deliberately fails closed unless the machine-readable promotion gate is
+    already promoted and the non-backtest reliability gates are explicitly
+    asserted with a future expiry.
+    """
+    current = now or datetime.now(timezone.utc)
+    gate_file = Path(promotion_gate_path)
+    report = _read_json_file(gate_file)
+    reasons = _promotion_gate_report_reasons(report)
+    reasons.extend(
+        _gate_reasons(
+            promoted=promoted,
+            promotion_expires_utc=promotion_expires_utc,
+            causal_integrity_passed=causal_integrity_passed,
+            statistical_gates_passed=statistical_gates_passed,
+            calibration_passed=calibration_passed,
+            prospective_shadow_passed=prospective_shadow_passed,
+            now=current,
+        )
+    )
+    status = "VERIFIED" if not reasons else "ABSTAIN"
+    candidate_label = str(report.get("candidate_label") or gate_file.stem)
+    summary = (
+        f"RL candidate {candidate_label} passed aggregate promotion and external reliability gates."
+        if status == "VERIFIED"
+        else f"RL candidate {candidate_label} is withheld from analyst use until promotion, statistical, calibration, and prospective gates pass."
+    )
+    provenance = {
+        "promotion_gate_report_path": str(gate_file),
+        "promotion_gate_report_sha256": _sha256_file(gate_file) if gate_file.exists() else "",
+        "candidate_label": candidate_label,
+        "promotion_gate_status": report.get("status", "missing"),
+        "promotion_gate_llm_evidence_status": report.get("llm_evidence_status", "missing"),
+        "promotion_gate_blocking_failures": report.get("blocking_failures", []),
+        "promotion_gate_provenance": report.get("provenance", {}),
+        "promotion_expires_utc": promotion_expires_utc,
+        "gates": {
+            "promoted": promoted,
+            "promotion_gate_promoted": str(report.get("status", "")).upper() == "PROMOTED",
+            "promotion_gate_llm_evidence_verified": str(report.get("llm_evidence_status", "")).upper() == "VERIFIED",
+            "causal_integrity_passed": causal_integrity_passed,
+            "statistical_gates_passed": statistical_gates_passed,
+            "calibration_passed": calibration_passed,
+            "prospective_shadow_passed": prospective_shadow_passed,
+        },
+    }
+    envelope = RLEvidenceEnvelope(
+        status=status,
+        as_of_utc=current.isoformat(),
+        horizon=horizon,
+        summary=summary,
+        reasons=reasons,
+        metrics=_public_promotion_gate_metrics(report),
+        uncertainty=_public_promotion_gate_uncertainty(report),
+        calibration={
+            "conformal_interval_available": False,
+            "trailing_coverage_available": False,
+            "status": "passed" if calibration_passed else "missing",
+        },
+        provenance=provenance,
+    ).to_dict()
+    if output_path is not None:
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(envelope, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return envelope
+
+
+def _promotion_gate_report_reasons(report: dict[str, Any]) -> list[str]:
+    if not report:
+        return ["promotion_gate_report_missing"]
+
+    reasons: list[str] = []
+    if str(report.get("status", "")).upper() != "PROMOTED":
+        reasons.append("promotion_gate_not_promoted")
+    if str(report.get("llm_evidence_status", "")).upper() != "VERIFIED":
+        reasons.append("promotion_gate_llm_evidence_not_verified")
+    blocking_failures = report.get("blocking_failures", [])
+    if isinstance(blocking_failures, list) and blocking_failures:
+        reasons.append("promotion_gate_blocking_failures_present")
+    return reasons
+
+
+def _public_promotion_gate_metrics(report: dict[str, Any]) -> dict[str, float | str | None]:
+    aggregate = report.get("aggregate", {}) if isinstance(report, dict) else {}
+    profiles = aggregate.get("profiles", {}) if isinstance(aggregate, dict) else {}
+    thresholds = (
+        report.get("provenance", {}).get("thresholds", {})
+        if isinstance(report.get("provenance", {}), dict)
+        else {}
+    )
+    operating_profile = str(thresholds.get("operating_profile") or "live_like_2x")
+    severe_profile = str(thresholds.get("severe_profile") or "live_like_3x")
+    metrics: dict[str, float | str | None] = {
+        "candidate_label": str(report.get("candidate_label") or "") if isinstance(report, dict) else "",
+        "seed_count": _parse_scalar(aggregate.get("seed_count")) if isinstance(aggregate, dict) else None,
+        "operating_profile": operating_profile,
+        "severe_profile": severe_profile,
+        "operating_min_return_pct": _profile_stat(profiles, operating_profile, "total_return_pct", "min"),
+        "operating_mean_return_pct": _profile_stat(profiles, operating_profile, "total_return_pct", "mean"),
+        "operating_min_sharpe": _profile_stat(profiles, operating_profile, "sharpe_ratio", "min"),
+        "operating_worst_drawdown_pct": _profile_stat(profiles, operating_profile, "max_drawdown_pct", "min"),
+        "severe_min_return_pct": _profile_stat(profiles, severe_profile, "total_return_pct", "min"),
+        "severe_mean_return_pct": _profile_stat(profiles, severe_profile, "total_return_pct", "mean"),
+        "severe_min_sharpe": _profile_stat(profiles, severe_profile, "sharpe_ratio", "min"),
+        "severe_worst_drawdown_pct": _profile_stat(profiles, severe_profile, "max_drawdown_pct", "min"),
+    }
+    return {key: value for key, value in metrics.items() if value is not None and value != ""}
+
+
+def _public_promotion_gate_uncertainty(report: dict[str, Any]) -> dict[str, Any]:
+    diagnostics = report.get("validation_diagnostics", {}) if isinstance(report, dict) else {}
+    aggregate = report.get("aggregate", {}) if isinstance(report, dict) else {}
+    return {
+        "bootstrap_interval_available": False,
+        "pbo_available": False,
+        "dsr_available": False,
+        "probability_of_improvement_available": False,
+        "promotion_gate_status": report.get("status", "missing") if isinstance(report, dict) else "missing",
+        "promotion_gate_llm_evidence_status": report.get("llm_evidence_status", "missing")
+        if isinstance(report, dict)
+        else "missing",
+        "blocking_failures": report.get("blocking_failures", []) if isinstance(report, dict) else [],
+        "seed_count": aggregate.get("seed_count") if isinstance(aggregate, dict) else None,
+        "validation_diagnostics": diagnostics if isinstance(diagnostics, dict) else {},
+        "caveat": "Aggregate historical promotion diagnostics do not make RL agent-trustworthy without causal, statistical, calibration, and prospective-shadow gates.",
+    }
+
+
+def _profile_stat(profiles: dict[str, Any], profile: str, metric: str, statistic: str) -> float | str | None:
+    if not isinstance(profiles, dict):
+        return None
+    profile_data = profiles.get(profile, {})
+    if not isinstance(profile_data, dict):
+        return None
+    metric_data = profile_data.get(metric, {})
+    if not isinstance(metric_data, dict):
+        return None
+    return _parse_scalar(metric_data.get(statistic))
+
+
 def _parse_scalar(value: Any) -> float | str | None:
     if value is None:
         return None

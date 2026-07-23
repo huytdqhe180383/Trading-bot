@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from tradingbot.analyst.rl_evidence import (
     RLEvidenceEnvelope,
     build_evidence_from_backtest,
+    build_evidence_from_promotion_gate,
     load_rl_evidence,
 )
 
@@ -151,6 +152,94 @@ class RLEvidenceTest(unittest.TestCase):
 
         self.assertEqual(evidence["status"], "VERIFIED")
         self.assertEqual(evidence["reasons"], [])
+
+    def test_build_from_promotion_gate_fails_closed_when_gate_not_promoted(self):
+        with TemporaryDirectory() as tmp_name:
+            base = Path(tmp_name)
+            gate_path = base / "promotion_gate_report.json"
+            out_path = base / "candidate_evidence.json"
+            gate_path.write_text(
+                json.dumps(
+                    {
+                        "candidate_label": "hold12captight_seed41_45",
+                        "status": "NOT_PROMOTED",
+                        "llm_evidence_status": "ABSTAIN",
+                        "blocking_failures": ["all_evidence_verified"],
+                        "aggregate": {
+                            "seed_count": 5,
+                            "profiles": {
+                                "live_like_2x": {
+                                    "total_return_pct": {"min": 61.45, "mean": 81.98},
+                                    "sharpe_ratio": {"min": 0.99, "mean": 1.22},
+                                    "max_drawdown_pct": {"min": -20.40, "mean": -17.70},
+                                },
+                                "live_like_3x": {
+                                    "total_return_pct": {"min": 1.90, "mean": 3.43},
+                                    "sharpe_ratio": {"min": 0.07, "mean": 0.12},
+                                    "max_drawdown_pct": {"min": -20.53, "mean": -17.92},
+                                },
+                            },
+                        },
+                        "provenance": {
+                            "thresholds": {
+                                "operating_profile": "live_like_2x",
+                                "severe_profile": "live_like_3x",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            evidence = build_evidence_from_promotion_gate(
+                promotion_gate_path=gate_path,
+                output_path=out_path,
+                now=datetime(2026, 7, 23, tzinfo=timezone.utc),
+            )
+            output_written = out_path.exists()
+
+        self.assertEqual(evidence["status"], "ABSTAIN")
+        self.assertIn("promotion_gate_not_promoted", evidence["reasons"])
+        self.assertIn("promotion_gate_llm_evidence_not_verified", evidence["reasons"])
+        self.assertIn("promotion_gate_blocking_failures_present", evidence["reasons"])
+        self.assertIn("prospective_shadow_gate_missing", evidence["reasons"])
+        self.assertEqual(evidence["metrics"]["seed_count"], 5.0)
+        self.assertEqual(evidence["metrics"]["severe_min_return_pct"], 1.9)
+        self.assertTrue(output_written)
+
+    def test_build_from_promotion_gate_can_emit_verified_when_all_gates_pass(self):
+        with TemporaryDirectory() as tmp_name:
+            base = Path(tmp_name)
+            gate_path = base / "promotion_gate_report.json"
+            now = datetime(2026, 7, 23, tzinfo=timezone.utc)
+            gate_path.write_text(
+                json.dumps(
+                    {
+                        "candidate_label": "promoted_candidate",
+                        "status": "PROMOTED",
+                        "llm_evidence_status": "VERIFIED",
+                        "blocking_failures": [],
+                        "aggregate": {"seed_count": 5, "profiles": {}},
+                        "provenance": {"target_weights": {"BTC": 0.5}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            evidence = build_evidence_from_promotion_gate(
+                promotion_gate_path=gate_path,
+                now=now,
+                promoted=True,
+                promotion_expires_utc=(now + timedelta(days=7)).isoformat(),
+                causal_integrity_passed=True,
+                statistical_gates_passed=True,
+                calibration_passed=True,
+                prospective_shadow_passed=True,
+            )
+
+        self.assertEqual(evidence["status"], "VERIFIED")
+        self.assertEqual(evidence["reasons"], [])
+        self.assertNotIn("target_weights", evidence["provenance"]["promotion_gate_provenance"])
 
 
 if __name__ == "__main__":

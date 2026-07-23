@@ -49,6 +49,7 @@ Aggregate artifacts:
 - Promotion gate report: `../../../results/daily/2026-07-23/rl_promotion_gate/hold12captight_seed41_45_1/promotion_gate_report.json`
 - Promotion gate summary: `../../../results/daily/2026-07-23/rl_promotion_gate/hold12captight_seed41_45_1/promotion_gate_summary.csv`
 - Validation summary: `../../../results/daily/2026-07-23/hold12captight_multiseed_seed41_45_1/validation_selection_summary.csv`
+- Aggregate candidate evidence envelope: `../../../results/daily/2026-07-23/rl_candidate_evidence/hold12captight_seed41_45_1/rl_evidence.json`
 
 Per-seed model and cost-stress artifacts:
 
@@ -124,6 +125,23 @@ The source evidence envelopes list these fail-closed reasons:
 - `calibration_gate_missing`
 - `prospective_shadow_gate_missing`
 
+## Aggregate analyst evidence envelope
+
+Follow-up implementation added `scripts/build_rl_candidate_evidence.py` and `build_evidence_from_promotion_gate(...)`.
+
+The generated aggregate envelope is preserved at `../../../results/daily/2026-07-23/rl_candidate_evidence/hold12captight_seed41_45_1/rl_evidence.json`.
+
+It contains the five-seed aggregate metrics that would be useful to an analyst, but it still emits:
+
+- status: `ABSTAIN`
+- horizon: `historical_multiseed_backtest`
+- severe min return: `1.9061%`
+- severe min Sharpe: `0.0730`
+- operating min return: `61.4550%`
+- operating min Sharpe: `0.9954`
+
+This is now the correct candidate handoff shape for the LLM path: one sanitized aggregate envelope, still non-executable, still fail-closed, and ready to become the configured analyst evidence path only after the missing gates are actually passed.
+
 ## Lessons for implementation
 
 1. Training/live execution parity mattered more than another reward tweak.
@@ -154,6 +172,9 @@ Passed:
 - Seeds `41` through `45` completed 1x/2x/3x cost-stress evaluation.
 - Seed `41` cost stress was refreshed under the current evidence-generation commit.
 - The aggregate promotion gate completed and failed closed only on LLM evidence gates.
+- The aggregate candidate evidence envelope was generated and confirmed to emit `ABSTAIN`.
+- Focused regression pack passed: `tests/test_rl_evidence.py tests/test_rl_promotion_gate.py tests/test_rl_cost_stress.py tests/test_trading_env_reward_controls.py tests/test_train_hygiene.py` (`32 passed`).
+- Analyst service regression passed: `tests/test_analyst_service.py` (`11 passed`).
 - Report links resolve to canonical `results/daily/2026-07-23/` artifacts.
 - Quick sensitive-string scan found no matches in this report and the referenced aggregate/promotion artifacts.
 
@@ -175,4 +196,3 @@ The next implementation slice should add an explicit shadow/promotion pipeline:
 4. publish an aggregate non-executable evidence envelope that remains `ABSTAIN` until all gates pass;
 5. start prospective shadow collection with calibration coverage and realized-outcome tracking;
 6. only after those gates pass, emit a short-lived `VERIFIED` envelope with a promotion expiry.
-
