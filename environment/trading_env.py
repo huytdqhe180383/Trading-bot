@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import (
     SYMBOLS, INITIAL_CAPITAL, BINANCE_SPOT_FEE,
     LOOKBACK_WINDOW, N_ASSETS, SLIPPAGE,
-    MIN_ORDER_USDT, REBALANCE_THRESHOLD,   # Fix 3-D, 3-F
+    MIN_ORDER_USDT,   # Fix 3-D, 3-F
     REBALANCE_THRESHOLD_NORMAL, REBALANCE_THRESHOLD_STRESS, REBALANCE_THRESHOLD_CRISIS,
     MIN_HOLD_BARS, MATERIAL_TRADE_THRESHOLD, REVERSAL_HYSTERESIS_MULT,
     POSITION_RESET_WEIGHT_THRESHOLD, POSITION_RESET_PERSIST_BARS,
@@ -109,6 +109,12 @@ class SpotPortfolioEnv(gym.Env):
         step_turnover_cap_normal: float | None = None,
         step_turnover_cap_stress: float | None = None,
         step_turnover_cap_crisis: float | None = None,
+        rebalance_threshold_normal: float | None = None,
+        rebalance_threshold_stress: float | None = None,
+        rebalance_threshold_crisis: float | None = None,
+        min_hold_bars: int | None = None,
+        material_trade_threshold: float | None = None,
+        reversal_hysteresis_mult: float | None = None,
     ):
         super().__init__()
 
@@ -158,6 +164,36 @@ class SpotPortfolioEnv(gym.Env):
             "step_turnover_cap_crisis",
             step_turnover_cap_crisis,
             STEP_TURNOVER_CAP_CRISIS,
+        )
+        self._rebalance_threshold_normal = self._non_negative_override(
+            "rebalance_threshold_normal",
+            rebalance_threshold_normal,
+            REBALANCE_THRESHOLD_NORMAL,
+        )
+        self._rebalance_threshold_stress = self._non_negative_override(
+            "rebalance_threshold_stress",
+            rebalance_threshold_stress,
+            REBALANCE_THRESHOLD_STRESS,
+        )
+        self._rebalance_threshold_crisis = self._non_negative_override(
+            "rebalance_threshold_crisis",
+            rebalance_threshold_crisis,
+            REBALANCE_THRESHOLD_CRISIS,
+        )
+        self._min_hold_bars = self._non_negative_int_override(
+            "min_hold_bars",
+            min_hold_bars,
+            MIN_HOLD_BARS,
+        )
+        self._material_trade_threshold = self._non_negative_override(
+            "material_trade_threshold",
+            material_trade_threshold,
+            MATERIAL_TRADE_THRESHOLD,
+        )
+        self._reversal_hysteresis_mult = self._non_negative_override(
+            "reversal_hysteresis_mult",
+            reversal_hysteresis_mult,
+            REVERSAL_HYSTERESIS_MULT,
         )
 
         # â”€â”€ Align dataframes to a common index â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -219,6 +255,13 @@ class SpotPortfolioEnv(gym.Env):
             raise ValueError(f"{name} must be non-negative")
         return resolved
 
+    @staticmethod
+    def _non_negative_int_override(name: str, value: int | None, default: int) -> int:
+        resolved = int(default if value is None else value)
+        if resolved < 0:
+            raise ValueError(f"{name} must be non-negative")
+        return resolved
+
     def get_market_regime(self) -> dict:
         """Return the current market regime metrics for the IMCA ensemble agent."""
         # Using BTC (symbols[0]) as the proxy for the overall crypto market regime
@@ -260,13 +303,13 @@ class SpotPortfolioEnv(gym.Env):
         }
         self._last_dynamic_max_asset_weight = float(MAX_ASSET_WEIGHT)
         self._semi_auto = SemiAutoRiskController()
-        self._bars_since_last_material_trade = max(int(MIN_HOLD_BARS), 0)
+        self._bars_since_last_material_trade = max(int(self._min_hold_bars), 0)
         self._last_material_trade_direction = np.zeros(self.n_assets, dtype=np.float32)
         self._position_reset_below_threshold_bars = np.zeros(self.n_assets, dtype=np.int32)
         self._last_execution_diag = {
             "requested_weight_delta": 0.0,
             "executed_weight_delta": 0.0,
-            "rebalance_threshold": float(REBALANCE_THRESHOLD),
+            "rebalance_threshold": float(self._rebalance_threshold_normal),
             "execution_regime_label": "normal",
             "rebalance_blocked_by_deadband": False,
             "rebalance_blocked_by_cooldown": False,
@@ -318,10 +361,10 @@ class SpotPortfolioEnv(gym.Env):
     def _execution_rebalance_threshold(self) -> tuple[float, str]:
         regime_label = self._execution_regime_label()
         if regime_label == "crisis":
-            return float(REBALANCE_THRESHOLD_CRISIS), regime_label
+            return float(self._rebalance_threshold_crisis), regime_label
         if regime_label == "stress":
-            return float(REBALANCE_THRESHOLD_STRESS), regime_label
-        return float(REBALANCE_THRESHOLD_NORMAL), regime_label
+            return float(self._rebalance_threshold_stress), regime_label
+        return float(self._rebalance_threshold_normal), regime_label
 
     def _apply_execution_controls(
         self,
@@ -336,13 +379,16 @@ class SpotPortfolioEnv(gym.Env):
         candidate = requested.copy()
         blocked_by_hysteresis = False
 
-        per_asset_floor = min(float(MATERIAL_TRADE_THRESHOLD), max(threshold, 1e-6))
+        per_asset_floor = min(float(self._material_trade_threshold), max(threshold, 1e-6))
         for idx in range(self.n_assets):
             if abs(float(candidate[idx] - current_weights[idx])) < per_asset_floor:
                 candidate[idx] = current_weights[idx]
         candidate = self._normalize_weights(candidate)
 
-        hysteresis_threshold = float(MATERIAL_TRADE_THRESHOLD) * max(float(REVERSAL_HYSTERESIS_MULT), 1.0)
+        hysteresis_threshold = float(self._material_trade_threshold) * max(
+            float(self._reversal_hysteresis_mult),
+            1.0,
+        )
         for idx in range(self.n_assets):
             delta = float(candidate[idx] - current_weights[idx])
             last_direction = float(self._last_material_trade_direction[idx])
@@ -363,9 +409,9 @@ class SpotPortfolioEnv(gym.Env):
             candidate_delta = 0.0
         elif (
             not governor_forced
-            and int(MIN_HOLD_BARS) > 0
-            and requested_delta >= float(MATERIAL_TRADE_THRESHOLD)
-            and self._bars_since_last_material_trade < int(MIN_HOLD_BARS)
+            and int(self._min_hold_bars) > 0
+            and requested_delta >= float(self._material_trade_threshold)
+            and self._bars_since_last_material_trade < int(self._min_hold_bars)
         ):
             blocked_by_cooldown = True
             candidate = current_weights.copy()
@@ -382,6 +428,21 @@ class SpotPortfolioEnv(gym.Env):
             "rebalance_forced_by_governor": bool(governor_forced and candidate_delta > 0.0),
         }
         return candidate.astype(np.float32), diag
+
+    def _update_material_trade_tracking(
+        self,
+        *,
+        old_weights: np.ndarray,
+        new_weights: np.ndarray,
+        executed_delta: float,
+    ) -> bool:
+        material_trade_executed = executed_delta >= float(self._material_trade_threshold)
+        if material_trade_executed:
+            self._last_material_trade_direction = np.sign(new_weights[:-1] - old_weights[:-1]).astype(np.float32)
+            self._bars_since_last_material_trade = 0
+        else:
+            self._bars_since_last_material_trade += 1
+        return material_trade_executed
 
     def _apply_trailing_stop_and_position_reset(
         self,
@@ -711,18 +772,17 @@ class SpotPortfolioEnv(gym.Env):
         planned_weights = self._softmax_weights(smoothed_action)
         
         # â”€â”€ Deadband Filter / Rebalancing Threshold (Fix 3-F) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # REBALANCE_THRESHOLD is now loaded from config.py (was a hard-coded local).
-        weight_diff = np.abs(planned_weights[:-1] - self._weights[:-1]).sum()
-        
-        if weight_diff > REBALANCE_THRESHOLD:
-            new_weights = planned_weights.copy()
-        else:
-            new_weights = self._weights.copy()
-        new_weights = self._apply_position_cap(new_weights)
-        new_weights = self._apply_stress_governor(new_weights)
-        new_weights = self._apply_step_turnover_cap(new_weights)
-            
+        # Apply the same execution controls used by production step_weights().
         old_weights = self._weights.copy()
+        requested_weights = self._apply_position_cap(planned_weights)
+        governed_weights = self._apply_stress_governor(requested_weights)
+        governor_forced = float(np.abs(governed_weights[:-1] - requested_weights[:-1]).sum()) > 1e-9
+        new_weights, execution_diag = self._apply_execution_controls(
+            governed_weights,
+            current_weights=old_weights,
+            governor_forced=governor_forced,
+        )
+        new_weights = self._apply_step_turnover_cap(new_weights)
 
         # Price change at this step for each asset
         returns = self._get_returns()   # ratio (e.g. 1.002 means +0.2%)
@@ -767,6 +827,12 @@ class SpotPortfolioEnv(gym.Env):
 
         self._portfolio *= max(net_return, 1e-6)
         self._weights    = new_weights
+        executed_delta = float(np.abs(new_weights[:-1] - old_weights[:-1]).sum())
+        material_trade_executed = self._update_material_trade_tracking(
+            old_weights=old_weights,
+            new_weights=new_weights,
+            executed_delta=executed_delta,
+        )
         
         # Track Drawdowns
         self._max_portfolio = max(self._max_portfolio, self._portfolio)
@@ -808,10 +874,29 @@ class SpotPortfolioEnv(gym.Env):
             "effective_slippage": self._last_cost_diag.get("effective_slippage", self.slippage),
             "slippage_volatility_proxy": self._last_cost_diag.get("volatility_proxy", 0.0),
             "dynamic_max_asset_weight": self._last_dynamic_max_asset_weight,
+            "requested_weight_delta": execution_diag["requested_weight_delta"],
+            "executed_weight_delta": executed_delta,
+            "rebalance_threshold": execution_diag["rebalance_threshold"],
+            "execution_regime_label": execution_diag["execution_regime_label"],
+            "rebalance_blocked_by_deadband": execution_diag["rebalance_blocked_by_deadband"],
+            "rebalance_blocked_by_cooldown": execution_diag["rebalance_blocked_by_cooldown"],
+            "rebalance_blocked_by_hysteresis": execution_diag["rebalance_blocked_by_hysteresis"],
+            "rebalance_forced_by_governor": execution_diag["rebalance_forced_by_governor"],
+            "bars_since_last_material_trade": self._bars_since_last_material_trade,
+            "material_trade_executed": material_trade_executed,
             "rebalance_blocked_by_min_notional": min_notional_diag["rebalance_blocked_by_min_notional"],
             "min_notional_blocked_count": min_notional_diag["min_notional_blocked_count"],
             "min_notional_blocked_assets": min_notional_diag["min_notional_blocked_assets"],
             **reward_components,
+        }
+        self._last_execution_diag = {
+            **execution_diag,
+            "executed_weight_delta": executed_delta,
+            "bars_since_last_material_trade": self._bars_since_last_material_trade,
+            "material_trade_executed": material_trade_executed,
+            "rebalance_blocked_by_min_notional": min_notional_diag["rebalance_blocked_by_min_notional"],
+            "min_notional_blocked_count": min_notional_diag["min_notional_blocked_count"],
+            "min_notional_blocked_assets": min_notional_diag["min_notional_blocked_assets"],
         }
 
         self._step_idx += 1
@@ -903,12 +988,11 @@ class SpotPortfolioEnv(gym.Env):
         self._portfolio *= max(net_return, 1e-6)
         self._weights = new_weights
         executed_delta = float(np.abs(new_weights[:-1] - old_weights[:-1]).sum())
-        material_trade_executed = executed_delta >= float(MATERIAL_TRADE_THRESHOLD)
-        if material_trade_executed:
-            self._last_material_trade_direction = np.sign(new_weights[:-1] - old_weights[:-1]).astype(np.float32)
-            self._bars_since_last_material_trade = 0
-        else:
-            self._bars_since_last_material_trade += 1
+        material_trade_executed = self._update_material_trade_tracking(
+            old_weights=old_weights,
+            new_weights=new_weights,
+            executed_delta=executed_delta,
+        )
 
         self._max_portfolio = max(self._max_portfolio, self._portfolio)
         abs_drawdown = (self._portfolio - self._max_portfolio) / (self._max_portfolio + 1e-9)

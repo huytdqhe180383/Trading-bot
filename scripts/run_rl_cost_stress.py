@@ -79,6 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--step-turnover-cap-normal", type=float, default=None)
     parser.add_argument("--step-turnover-cap-stress", type=float, default=None)
     parser.add_argument("--step-turnover-cap-crisis", type=float, default=None)
+    parser.add_argument("--rebalance-threshold-normal", type=float, default=None)
+    parser.add_argument("--rebalance-threshold-stress", type=float, default=None)
+    parser.add_argument("--rebalance-threshold-crisis", type=float, default=None)
+    parser.add_argument("--min-hold-bars", type=int, default=None)
+    parser.add_argument("--material-trade-threshold", type=float, default=None)
+    parser.add_argument("--reversal-hysteresis-mult", type=float, default=None)
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -150,6 +156,12 @@ def build_backtest_command(
     step_turnover_cap_normal: float | None = None,
     step_turnover_cap_stress: float | None = None,
     step_turnover_cap_crisis: float | None = None,
+    rebalance_threshold_normal: float | None = None,
+    rebalance_threshold_stress: float | None = None,
+    rebalance_threshold_crisis: float | None = None,
+    min_hold_bars: int | None = None,
+    material_trade_threshold: float | None = None,
+    reversal_hysteresis_mult: float | None = None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -179,6 +191,12 @@ def build_backtest_command(
         ("--step-turnover-cap-normal", step_turnover_cap_normal),
         ("--step-turnover-cap-stress", step_turnover_cap_stress),
         ("--step-turnover-cap-crisis", step_turnover_cap_crisis),
+        ("--rebalance-threshold-normal", rebalance_threshold_normal),
+        ("--rebalance-threshold-stress", rebalance_threshold_stress),
+        ("--rebalance-threshold-crisis", rebalance_threshold_crisis),
+        ("--min-hold-bars", min_hold_bars),
+        ("--material-trade-threshold", material_trade_threshold),
+        ("--reversal-hysteresis-mult", reversal_hysteresis_mult),
     ]:
         if value is not None:
             if value < 0:
@@ -295,6 +313,12 @@ def run_cost_stress(args: argparse.Namespace) -> Path:
                     step_turnover_cap_normal=args.step_turnover_cap_normal,
                     step_turnover_cap_stress=args.step_turnover_cap_stress,
                     step_turnover_cap_crisis=args.step_turnover_cap_crisis,
+                    rebalance_threshold_normal=args.rebalance_threshold_normal,
+                    rebalance_threshold_stress=args.rebalance_threshold_stress,
+                    rebalance_threshold_crisis=args.rebalance_threshold_crisis,
+                    min_hold_bars=args.min_hold_bars,
+                    material_trade_threshold=args.material_trade_threshold,
+                    reversal_hysteresis_mult=args.reversal_hysteresis_mult,
                 ),
                 stdout_path=backtest_stdout,
                 stderr_path=backtest_stderr,

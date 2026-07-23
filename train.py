@@ -417,6 +417,12 @@ def train_algo(
     training_step_turnover_cap_normal: float | None = None,
     training_step_turnover_cap_stress: float | None = None,
     training_step_turnover_cap_crisis: float | None = None,
+    training_rebalance_threshold_normal: float | None = None,
+    training_rebalance_threshold_stress: float | None = None,
+    training_rebalance_threshold_crisis: float | None = None,
+    training_min_hold_bars: int | None = None,
+    training_material_trade_threshold: float | None = None,
+    training_reversal_hysteresis_mult: float | None = None,
     validation_early_stop_patience: int = 10,
     validation_early_stop_min_evals: int = 20,
     progress_bar: bool = False,
@@ -457,6 +463,18 @@ def train_algo(
             env_kwargs["step_turnover_cap_stress"] = float(training_step_turnover_cap_stress)
         if training_step_turnover_cap_crisis is not None:
             env_kwargs["step_turnover_cap_crisis"] = float(training_step_turnover_cap_crisis)
+        if training_rebalance_threshold_normal is not None:
+            env_kwargs["rebalance_threshold_normal"] = float(training_rebalance_threshold_normal)
+        if training_rebalance_threshold_stress is not None:
+            env_kwargs["rebalance_threshold_stress"] = float(training_rebalance_threshold_stress)
+        if training_rebalance_threshold_crisis is not None:
+            env_kwargs["rebalance_threshold_crisis"] = float(training_rebalance_threshold_crisis)
+        if training_min_hold_bars is not None:
+            env_kwargs["min_hold_bars"] = int(training_min_hold_bars)
+        if training_material_trade_threshold is not None:
+            env_kwargs["material_trade_threshold"] = float(training_material_trade_threshold)
+        if training_reversal_hysteresis_mult is not None:
+            env_kwargs["reversal_hysteresis_mult"] = float(training_reversal_hysteresis_mult)
         env = SpotPortfolioEnv(train_data, mode="train", **env_kwargs)
         return Monitor(env, str(LOGS_DIR / algo))
 
@@ -503,6 +521,12 @@ def train_algo(
                     "step_turnover_cap_normal": training_step_turnover_cap_normal,
                     "step_turnover_cap_stress": training_step_turnover_cap_stress,
                     "step_turnover_cap_crisis": training_step_turnover_cap_crisis,
+                    "rebalance_threshold_normal": training_rebalance_threshold_normal,
+                    "rebalance_threshold_stress": training_rebalance_threshold_stress,
+                    "rebalance_threshold_crisis": training_rebalance_threshold_crisis,
+                    "min_hold_bars": training_min_hold_bars,
+                    "material_trade_threshold": training_material_trade_threshold,
+                    "reversal_hysteresis_mult": training_reversal_hysteresis_mult,
                 }.items()
                 if value is not None
             },
@@ -684,6 +708,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Training per-step turnover cap in crisis regimes.",
     )
     parser.add_argument(
+        "--training-rebalance-threshold-normal",
+        type=float,
+        default=None,
+        help="Training execution deadband threshold in normal regimes.",
+    )
+    parser.add_argument(
+        "--training-rebalance-threshold-stress",
+        type=float,
+        default=None,
+        help="Training execution deadband threshold in stress regimes.",
+    )
+    parser.add_argument(
+        "--training-rebalance-threshold-crisis",
+        type=float,
+        default=None,
+        help="Training execution deadband threshold in crisis regimes.",
+    )
+    parser.add_argument(
+        "--training-min-hold-bars",
+        type=int,
+        default=None,
+        help="Minimum bars between material training rebalances.",
+    )
+    parser.add_argument(
+        "--training-material-trade-threshold",
+        type=float,
+        default=None,
+        help="Executed weight delta counted as a material trade in training.",
+    )
+    parser.add_argument(
+        "--training-reversal-hysteresis-mult",
+        type=float,
+        default=None,
+        help="Multiplier that a reversal must exceed before training execution flips direction.",
+    )
+    parser.add_argument(
         "--require-gpu",
         action="store_true",
         default=REQUIRE_GPU_FOR_TRAINING,
@@ -763,6 +823,12 @@ def build_post_training_backtest_command(args: argparse.Namespace) -> list[str]:
         ("--step-turnover-cap-normal", "training_step_turnover_cap_normal"),
         ("--step-turnover-cap-stress", "training_step_turnover_cap_stress"),
         ("--step-turnover-cap-crisis", "training_step_turnover_cap_crisis"),
+        ("--rebalance-threshold-normal", "training_rebalance_threshold_normal"),
+        ("--rebalance-threshold-stress", "training_rebalance_threshold_stress"),
+        ("--rebalance-threshold-crisis", "training_rebalance_threshold_crisis"),
+        ("--min-hold-bars", "training_min_hold_bars"),
+        ("--material-trade-threshold", "training_material_trade_threshold"),
+        ("--reversal-hysteresis-mult", "training_reversal_hysteresis_mult"),
     ]:
         value = getattr(args, attr, None)
         if value is not None:
@@ -799,6 +865,12 @@ def main():
         "training_step_turnover_cap_normal",
         "training_step_turnover_cap_stress",
         "training_step_turnover_cap_crisis",
+        "training_rebalance_threshold_normal",
+        "training_rebalance_threshold_stress",
+        "training_rebalance_threshold_crisis",
+        "training_min_hold_bars",
+        "training_material_trade_threshold",
+        "training_reversal_hysteresis_mult",
     ]
     for option in non_negative_options:
         value = getattr(args, option)
@@ -835,6 +907,12 @@ def main():
             training_step_turnover_cap_normal=args.training_step_turnover_cap_normal,
             training_step_turnover_cap_stress=args.training_step_turnover_cap_stress,
             training_step_turnover_cap_crisis=args.training_step_turnover_cap_crisis,
+            training_rebalance_threshold_normal=args.training_rebalance_threshold_normal,
+            training_rebalance_threshold_stress=args.training_rebalance_threshold_stress,
+            training_rebalance_threshold_crisis=args.training_rebalance_threshold_crisis,
+            training_min_hold_bars=args.training_min_hold_bars,
+            training_material_trade_threshold=args.training_material_trade_threshold,
+            training_reversal_hysteresis_mult=args.training_reversal_hysteresis_mult,
             validation_early_stop_patience=args.validation_early_stop_patience,
             validation_early_stop_min_evals=args.validation_early_stop_min_evals,
             progress_bar=args.progress_bar,

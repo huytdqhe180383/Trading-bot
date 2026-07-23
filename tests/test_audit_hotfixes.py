@@ -273,6 +273,55 @@ class AuditHotfixTest(unittest.TestCase):
         finally:
             trading_env.STEP_TURNOVER_CAP_ENABLED = old_enabled
 
+    def test_execution_control_constructor_overrides_do_not_mutate_global_defaults(self):
+        old_normal = trading_env.REBALANCE_THRESHOLD_NORMAL
+        old_hold = trading_env.MIN_HOLD_BARS
+        old_material = trading_env.MATERIAL_TRADE_THRESHOLD
+        try:
+            trading_env.REBALANCE_THRESHOLD_NORMAL = 0.01
+            trading_env.MIN_HOLD_BARS = 1
+            trading_env.MATERIAL_TRADE_THRESHOLD = 0.02
+            env = SpotPortfolioEnv(
+                _sample_data(),
+                lookback=30,
+                mode="eval",
+                rebalance_threshold_normal=0.10,
+                min_hold_bars=8,
+                material_trade_threshold=0.10,
+                reversal_hysteresis_mult=2.0,
+            )
+            env._weights = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+            _, _, _, _, info = env.step_weights(np.array([0.08, 0.0, 0.92], dtype=np.float32))
+
+            self.assertTrue(info["rebalance_blocked_by_deadband"])
+            self.assertAlmostEqual(float(info["rebalance_threshold"]), 0.10, places=6)
+            self.assertAlmostEqual(float(info["executed_weight_delta"]), 0.0, places=6)
+            self.assertEqual(trading_env.REBALANCE_THRESHOLD_NORMAL, 0.01)
+            self.assertEqual(trading_env.MIN_HOLD_BARS, 1)
+            self.assertEqual(trading_env.MATERIAL_TRADE_THRESHOLD, 0.02)
+        finally:
+            trading_env.REBALANCE_THRESHOLD_NORMAL = old_normal
+            trading_env.MIN_HOLD_BARS = old_hold
+            trading_env.MATERIAL_TRADE_THRESHOLD = old_material
+
+    def test_training_step_applies_constructor_cooldown_override(self):
+        env = SpotPortfolioEnv(
+            _sample_data(),
+            lookback=30,
+            mode="train",
+            rebalance_threshold_normal=0.01,
+            min_hold_bars=5,
+            material_trade_threshold=0.05,
+        )
+
+        _, _, _, _, info_first = env.step(np.array([1.0, -1.0], dtype=np.float32))
+        _, _, _, _, info_second = env.step(np.array([-1.0, 1.0], dtype=np.float32))
+
+        self.assertTrue(info_first["material_trade_executed"])
+        self.assertTrue(info_second["rebalance_blocked_by_cooldown"])
+        self.assertAlmostEqual(float(info_second["executed_weight_delta"]), 0.0, places=6)
+
     def test_stress_threshold_blocks_small_rebalance_even_above_normal_threshold(self):
         old_normal = trading_env.REBALANCE_THRESHOLD_NORMAL
         old_stress = trading_env.REBALANCE_THRESHOLD_STRESS

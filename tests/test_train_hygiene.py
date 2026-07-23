@@ -149,6 +149,18 @@ class TrainHygieneTest(unittest.TestCase):
                 "0.10",
                 "--training-step-turnover-cap-crisis",
                 "0.06",
+                "--training-rebalance-threshold-normal",
+                "0.08",
+                "--training-rebalance-threshold-stress",
+                "0.12",
+                "--training-rebalance-threshold-crisis",
+                "0.18",
+                "--training-min-hold-bars",
+                "8",
+                "--training-material-trade-threshold",
+                "0.10",
+                "--training-reversal-hysteresis-mult",
+                "2.0",
             ]
         )
 
@@ -160,6 +172,12 @@ class TrainHygieneTest(unittest.TestCase):
         self.assertEqual(args.training_step_turnover_cap_normal, 0.15)
         self.assertEqual(args.training_step_turnover_cap_stress, 0.10)
         self.assertEqual(args.training_step_turnover_cap_crisis, 0.06)
+        self.assertEqual(args.training_rebalance_threshold_normal, 0.08)
+        self.assertEqual(args.training_rebalance_threshold_stress, 0.12)
+        self.assertEqual(args.training_rebalance_threshold_crisis, 0.18)
+        self.assertEqual(args.training_min_hold_bars, 8)
+        self.assertEqual(args.training_material_trade_threshold, 0.10)
+        self.assertEqual(args.training_reversal_hysteresis_mult, 2.0)
 
     def test_post_training_backtest_defaults_to_dynamic_rl_only(self):
         args = build_parser().parse_args([])
@@ -206,6 +224,18 @@ class TrainHygieneTest(unittest.TestCase):
                 "0.10",
                 "--training-step-turnover-cap-crisis",
                 "0.06",
+                "--training-rebalance-threshold-normal",
+                "0.08",
+                "--training-rebalance-threshold-stress",
+                "0.12",
+                "--training-rebalance-threshold-crisis",
+                "0.18",
+                "--training-min-hold-bars",
+                "8",
+                "--training-material-trade-threshold",
+                "0.10",
+                "--training-reversal-hysteresis-mult",
+                "2.0",
             ]
         )
 
@@ -218,6 +248,18 @@ class TrainHygieneTest(unittest.TestCase):
         self.assertIn("0.1", command)
         self.assertIn("--step-turnover-cap-crisis", command)
         self.assertIn("0.06", command)
+        self.assertIn("--rebalance-threshold-normal", command)
+        self.assertIn("0.08", command)
+        self.assertIn("--rebalance-threshold-stress", command)
+        self.assertIn("0.12", command)
+        self.assertIn("--rebalance-threshold-crisis", command)
+        self.assertIn("0.18", command)
+        self.assertIn("--min-hold-bars", command)
+        self.assertIn("8", command)
+        self.assertIn("--material-trade-threshold", command)
+        self.assertIn("0.1", command)
+        self.assertIn("--reversal-hysteresis-mult", command)
+        self.assertIn("2.0", command)
 
     def test_load_resumed_model_reapplies_requested_seed(self):
         cls = Mock()

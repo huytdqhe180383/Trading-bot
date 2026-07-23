@@ -44,6 +44,12 @@ class RLCostStressTest(unittest.TestCase):
             step_turnover_cap_normal=0.15,
             step_turnover_cap_stress=0.10,
             step_turnover_cap_crisis=0.06,
+            rebalance_threshold_normal=0.08,
+            rebalance_threshold_stress=0.12,
+            rebalance_threshold_crisis=0.18,
+            min_hold_bars=8,
+            material_trade_threshold=0.10,
+            reversal_hysteresis_mult=2.0,
         )
 
         self.assertEqual(command[0], sys.executable)
@@ -61,6 +67,18 @@ class RLCostStressTest(unittest.TestCase):
         self.assertIn("0.1", command)
         self.assertIn("--step-turnover-cap-crisis", command)
         self.assertIn("0.06", command)
+        self.assertIn("--rebalance-threshold-normal", command)
+        self.assertIn("0.08", command)
+        self.assertIn("--rebalance-threshold-stress", command)
+        self.assertIn("0.12", command)
+        self.assertIn("--rebalance-threshold-crisis", command)
+        self.assertIn("0.18", command)
+        self.assertIn("--min-hold-bars", command)
+        self.assertIn("8", command)
+        self.assertIn("--material-trade-threshold", command)
+        self.assertIn("0.1", command)
+        self.assertIn("--reversal-hysteresis-mult", command)
+        self.assertIn("2.0", command)
 
     def test_run_cost_stress_dry_run_writes_commands_and_summary(self):
         with tempfile.TemporaryDirectory() as tmp_name:
@@ -77,6 +95,12 @@ class RLCostStressTest(unittest.TestCase):
                 step_turnover_cap_normal=None,
                 step_turnover_cap_stress=None,
                 step_turnover_cap_crisis=None,
+                rebalance_threshold_normal=None,
+                rebalance_threshold_stress=None,
+                rebalance_threshold_crisis=None,
+                min_hold_bars=None,
+                material_trade_threshold=None,
+                reversal_hysteresis_mult=None,
                 dry_run=True,
             )
             with patch.object(runner, "_current_git_commit", return_value="abc123"):
