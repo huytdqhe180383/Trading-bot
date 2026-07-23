@@ -12,6 +12,7 @@ from train import (
     build_parser,
     build_post_training_backtest_command,
     parse_validation_cost_profiles,
+    RollingValidationCallback,
     summarize_validation_windows,
     split_train_validation,
     validation_selection_score,
@@ -87,6 +88,24 @@ class TrainHygieneTest(unittest.TestCase):
 
         self.assertEqual(score, -5.0)
 
+    def test_rolling_validation_early_stop_triggers_at_patience_boundary(self):
+        callback = RollingValidationCallback(
+            validation_windows=[],
+            best_model_save_path="models/PPO",
+            algo="PPO",
+            eval_freq=1,
+            max_no_improvement_evals=1,
+            min_evals=2,
+            verbose=0,
+        )
+        callback.eval_count = 2
+        callback.no_improvement_evals = 1
+
+        self.assertTrue(callback.should_stop_early())
+
+        callback.no_improvement_evals = 0
+        self.assertFalse(callback.should_stop_early())
+
     def test_parser_accepts_cost_aware_validation_options(self):
         args = build_parser().parse_args(
             [
@@ -94,6 +113,10 @@ class TrainHygieneTest(unittest.TestCase):
                 "nominal:0.0012:0.0018,stress2x:0.0024:0.0036",
                 "--validation-score-mode",
                 "worst_profile_mean",
+                "--validation-early-stop-patience",
+                "1",
+                "--validation-early-stop-min-evals",
+                "2",
                 "--training-fee",
                 "0.0024",
                 "--training-slippage",
@@ -103,6 +126,8 @@ class TrainHygieneTest(unittest.TestCase):
 
         self.assertEqual(args.validation_score_mode, "worst_profile_mean")
         self.assertEqual(args.validation_cost_profiles[1].label, "stress2x")
+        self.assertEqual(args.validation_early_stop_patience, 1)
+        self.assertEqual(args.validation_early_stop_min_evals, 2)
         self.assertEqual(args.training_fee, 0.0024)
         self.assertEqual(args.training_slippage, 0.0036)
 

@@ -201,6 +201,12 @@ class RollingValidationCallback(BaseCallback):
         self.eval_count = 0
         self.evaluation_rows: list[dict[str, float | int | str]] = []
 
+    def should_stop_early(self) -> bool:
+        return (
+            self.eval_count >= self.min_evals
+            and self.no_improvement_evals >= self.max_no_improvement_evals
+        )
+
     def _on_step(self) -> bool:
         if self.n_calls % self.eval_freq != 0:
             return True
@@ -288,7 +294,7 @@ class RollingValidationCallback(BaseCallback):
         else:
             self.no_improvement_evals += 1
 
-        if self.eval_count >= self.min_evals and self.no_improvement_evals > self.max_no_improvement_evals:
+        if self.should_stop_early():
             if self.verbose:
                 logger.warning(
                     f"Stopping {self.algo}: no rolling-validation improvement for "
@@ -411,6 +417,8 @@ def train_algo(
     training_step_turnover_cap_normal: float | None = None,
     training_step_turnover_cap_stress: float | None = None,
     training_step_turnover_cap_crisis: float | None = None,
+    validation_early_stop_patience: int = 10,
+    validation_early_stop_min_evals: int = 20,
     progress_bar: bool = False,
 ):
     """Train a single algorithm and save the best model."""
@@ -500,8 +508,8 @@ def train_algo(
             },
             score_mode=validation_score_mode,
             deterministic=True,
-            max_no_improvement_evals=10,
-            min_evals=20,
+            max_no_improvement_evals=validation_early_stop_patience,
+            min_evals=validation_early_stop_min_evals,
             verbose=1,
         )
         callbacks.append(eval_cb)
@@ -602,6 +610,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="mean_reward",
         choices=["mean_reward", "worst_profile_mean", "mean_minus_std"],
         help="Checkpoint selection score computed from rolling validation rewards.",
+    )
+    parser.add_argument(
+        "--validation-early-stop-patience",
+        type=int,
+        default=10,
+        help="Stop after this many consecutive non-improving rolling validations once min evals is reached.",
+    )
+    parser.add_argument(
+        "--validation-early-stop-min-evals",
+        type=int,
+        default=20,
+        help="Minimum rolling-validation evaluations before early stopping can trigger.",
     )
     parser.add_argument(
         "--training-fee",
@@ -767,6 +787,10 @@ def main():
         raise ValueError("--training-fee must be non-negative")
     if args.training_slippage is not None and args.training_slippage < 0:
         raise ValueError("--training-slippage must be non-negative")
+    if args.validation_early_stop_patience < 1:
+        raise ValueError("--validation-early-stop-patience must be at least 1")
+    if args.validation_early_stop_min_evals < 1:
+        raise ValueError("--validation-early-stop-min-evals must be at least 1")
     non_negative_options = [
         "training_reward_turnover_weight",
         "training_reward_action_delta_weight",
@@ -811,6 +835,8 @@ def main():
             training_step_turnover_cap_normal=args.training_step_turnover_cap_normal,
             training_step_turnover_cap_stress=args.training_step_turnover_cap_stress,
             training_step_turnover_cap_crisis=args.training_step_turnover_cap_crisis,
+            validation_early_stop_patience=args.validation_early_stop_patience,
+            validation_early_stop_min_evals=args.validation_early_stop_min_evals,
             progress_bar=args.progress_bar,
         )
 
