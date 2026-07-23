@@ -136,12 +136,22 @@ class TrainHygieneTest(unittest.TestCase):
             [
                 "--training-reward-turnover-weight",
                 "5.0",
+                "--training-reward-missed-opportunity-weight",
+                "0.05",
                 "--training-reward-action-delta-weight",
                 "2.0",
                 "--training-reward-action-delta-deadband",
                 "0.0",
                 "--training-reward-action-delta-scale",
                 "1.5",
+                "--training-reward-cash-buffer-weight",
+                "0.02",
+                "--training-reward-cash-buffer-threshold",
+                "0.65",
+                "--training-reward-risk-exposure-weight",
+                "0.05",
+                "--training-reward-risk-exposure-threshold",
+                "0.25",
                 "--training-step-turnover-cap",
                 "--training-step-turnover-cap-normal",
                 "0.15",
@@ -165,9 +175,14 @@ class TrainHygieneTest(unittest.TestCase):
         )
 
         self.assertEqual(args.training_reward_turnover_weight, 5.0)
+        self.assertEqual(args.training_reward_missed_opportunity_weight, 0.05)
         self.assertEqual(args.training_reward_action_delta_weight, 2.0)
         self.assertEqual(args.training_reward_action_delta_deadband, 0.0)
         self.assertEqual(args.training_reward_action_delta_scale, 1.5)
+        self.assertEqual(args.training_reward_cash_buffer_weight, 0.02)
+        self.assertEqual(args.training_reward_cash_buffer_threshold, 0.65)
+        self.assertEqual(args.training_reward_risk_exposure_weight, 0.05)
+        self.assertEqual(args.training_reward_risk_exposure_threshold, 0.25)
         self.assertTrue(args.training_step_turnover_cap)
         self.assertEqual(args.training_step_turnover_cap_normal, 0.15)
         self.assertEqual(args.training_step_turnover_cap_stress, 0.10)

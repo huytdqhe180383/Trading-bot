@@ -410,9 +410,14 @@ def train_algo(
     training_fee: float | None = None,
     training_slippage: float | None = None,
     training_reward_turnover_weight: float | None = None,
+    training_reward_missed_opportunity_weight: float | None = None,
     training_reward_action_delta_weight: float | None = None,
     training_reward_action_delta_deadband: float | None = None,
     training_reward_action_delta_scale: float | None = None,
+    training_reward_cash_buffer_weight: float | None = None,
+    training_reward_cash_buffer_threshold: float | None = None,
+    training_reward_risk_exposure_weight: float | None = None,
+    training_reward_risk_exposure_threshold: float | None = None,
     training_step_turnover_cap_enabled: bool | None = None,
     training_step_turnover_cap_normal: float | None = None,
     training_step_turnover_cap_stress: float | None = None,
@@ -449,12 +454,22 @@ def train_algo(
             env_kwargs["slippage"] = float(training_slippage)
         if training_reward_turnover_weight is not None:
             env_kwargs["reward_turnover_weight"] = float(training_reward_turnover_weight)
+        if training_reward_missed_opportunity_weight is not None:
+            env_kwargs["reward_missed_opportunity_weight"] = float(training_reward_missed_opportunity_weight)
         if training_reward_action_delta_weight is not None:
             env_kwargs["reward_action_delta_weight"] = float(training_reward_action_delta_weight)
         if training_reward_action_delta_deadband is not None:
             env_kwargs["reward_action_delta_deadband"] = float(training_reward_action_delta_deadband)
         if training_reward_action_delta_scale is not None:
             env_kwargs["reward_action_delta_scale"] = float(training_reward_action_delta_scale)
+        if training_reward_cash_buffer_weight is not None:
+            env_kwargs["reward_cash_buffer_weight"] = float(training_reward_cash_buffer_weight)
+        if training_reward_cash_buffer_threshold is not None:
+            env_kwargs["reward_cash_buffer_threshold"] = float(training_reward_cash_buffer_threshold)
+        if training_reward_risk_exposure_weight is not None:
+            env_kwargs["reward_risk_exposure_weight"] = float(training_reward_risk_exposure_weight)
+        if training_reward_risk_exposure_threshold is not None:
+            env_kwargs["reward_risk_exposure_threshold"] = float(training_reward_risk_exposure_threshold)
         if training_step_turnover_cap_enabled is not None:
             env_kwargs["step_turnover_cap_enabled"] = bool(training_step_turnover_cap_enabled)
         if training_step_turnover_cap_normal is not None:
@@ -514,9 +529,14 @@ def train_algo(
                 key: value
                 for key, value in {
                     "reward_turnover_weight": training_reward_turnover_weight,
+                    "reward_missed_opportunity_weight": training_reward_missed_opportunity_weight,
                     "reward_action_delta_weight": training_reward_action_delta_weight,
                     "reward_action_delta_deadband": training_reward_action_delta_deadband,
                     "reward_action_delta_scale": training_reward_action_delta_scale,
+                    "reward_cash_buffer_weight": training_reward_cash_buffer_weight,
+                    "reward_cash_buffer_threshold": training_reward_cash_buffer_threshold,
+                    "reward_risk_exposure_weight": training_reward_risk_exposure_weight,
+                    "reward_risk_exposure_threshold": training_reward_risk_exposure_threshold,
                     "step_turnover_cap_enabled": training_step_turnover_cap_enabled,
                     "step_turnover_cap_normal": training_step_turnover_cap_normal,
                     "step_turnover_cap_stress": training_step_turnover_cap_stress,
@@ -666,6 +686,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the training and rolling-validation reward turnover weight.",
     )
     parser.add_argument(
+        "--training-reward-missed-opportunity-weight",
+        type=float,
+        default=None,
+        help="Override the cash missed-opportunity penalty weight.",
+    )
+    parser.add_argument(
         "--training-reward-action-delta-weight",
         type=float,
         default=None,
@@ -682,6 +708,30 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Override the action-delta reward scale.",
+    )
+    parser.add_argument(
+        "--training-reward-cash-buffer-weight",
+        type=float,
+        default=None,
+        help="Reward weight for preserving cash above the configured threshold.",
+    )
+    parser.add_argument(
+        "--training-reward-cash-buffer-threshold",
+        type=float,
+        default=None,
+        help="Cash weight threshold above which the cash-buffer reward applies.",
+    )
+    parser.add_argument(
+        "--training-reward-risk-exposure-weight",
+        type=float,
+        default=None,
+        help="Penalty weight for risk-on exposure above the configured threshold.",
+    )
+    parser.add_argument(
+        "--training-reward-risk-exposure-threshold",
+        type=float,
+        default=None,
+        help="Risk-on exposure threshold above which the exposure penalty applies.",
     )
     parser.add_argument(
         "--training-step-turnover-cap",
@@ -859,9 +909,14 @@ def main():
         raise ValueError("--validation-early-stop-min-evals must be at least 1")
     non_negative_options = [
         "training_reward_turnover_weight",
+        "training_reward_missed_opportunity_weight",
         "training_reward_action_delta_weight",
         "training_reward_action_delta_deadband",
         "training_reward_action_delta_scale",
+        "training_reward_cash_buffer_weight",
+        "training_reward_cash_buffer_threshold",
+        "training_reward_risk_exposure_weight",
+        "training_reward_risk_exposure_threshold",
         "training_step_turnover_cap_normal",
         "training_step_turnover_cap_stress",
         "training_step_turnover_cap_crisis",
@@ -900,9 +955,14 @@ def main():
             training_fee=args.training_fee,
             training_slippage=args.training_slippage,
             training_reward_turnover_weight=args.training_reward_turnover_weight,
+            training_reward_missed_opportunity_weight=args.training_reward_missed_opportunity_weight,
             training_reward_action_delta_weight=args.training_reward_action_delta_weight,
             training_reward_action_delta_deadband=args.training_reward_action_delta_deadband,
             training_reward_action_delta_scale=args.training_reward_action_delta_scale,
+            training_reward_cash_buffer_weight=args.training_reward_cash_buffer_weight,
+            training_reward_cash_buffer_threshold=args.training_reward_cash_buffer_threshold,
+            training_reward_risk_exposure_weight=args.training_reward_risk_exposure_weight,
+            training_reward_risk_exposure_threshold=args.training_reward_risk_exposure_threshold,
             training_step_turnover_cap_enabled=args.training_step_turnover_cap,
             training_step_turnover_cap_normal=args.training_step_turnover_cap_normal,
             training_step_turnover_cap_stress=args.training_step_turnover_cap_stress,

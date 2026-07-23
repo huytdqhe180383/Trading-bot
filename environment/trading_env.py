@@ -102,9 +102,14 @@ class SpotPortfolioEnv(gym.Env):
         lookback: int = LOOKBACK_WINDOW,
         mode: str = "train",   # "train" | "eval"
         reward_turnover_weight: float | None = None,
+        reward_missed_opportunity_weight: float | None = None,
         reward_action_delta_weight: float | None = None,
         reward_action_delta_deadband: float | None = None,
         reward_action_delta_scale: float | None = None,
+        reward_cash_buffer_weight: float | None = None,
+        reward_cash_buffer_threshold: float | None = None,
+        reward_risk_exposure_weight: float | None = None,
+        reward_risk_exposure_threshold: float | None = None,
         step_turnover_cap_enabled: bool | None = None,
         step_turnover_cap_normal: float | None = None,
         step_turnover_cap_stress: float | None = None,
@@ -130,6 +135,10 @@ class SpotPortfolioEnv(gym.Env):
             if reward_turnover_weight < 0:
                 raise ValueError("reward_turnover_weight must be non-negative")
             self._reward_weights["turnover"] = float(reward_turnover_weight)
+        if reward_missed_opportunity_weight is not None:
+            if reward_missed_opportunity_weight < 0:
+                raise ValueError("reward_missed_opportunity_weight must be non-negative")
+            self._reward_weights["missed_opportunity"] = float(reward_missed_opportunity_weight)
         self._reward_action_delta_weight = self._non_negative_override(
             "reward_action_delta_weight",
             reward_action_delta_weight,
@@ -144,6 +153,26 @@ class SpotPortfolioEnv(gym.Env):
             "reward_action_delta_scale",
             reward_action_delta_scale,
             REWARD_ACTION_DELTA_SCALE,
+        )
+        self._reward_cash_buffer_weight = self._non_negative_override(
+            "reward_cash_buffer_weight",
+            reward_cash_buffer_weight,
+            0.0,
+        )
+        self._reward_cash_buffer_threshold = self._non_negative_override(
+            "reward_cash_buffer_threshold",
+            reward_cash_buffer_threshold,
+            0.5,
+        )
+        self._reward_risk_exposure_weight = self._non_negative_override(
+            "reward_risk_exposure_weight",
+            reward_risk_exposure_weight,
+            0.0,
+        )
+        self._reward_risk_exposure_threshold = self._non_negative_override(
+            "reward_risk_exposure_threshold",
+            reward_risk_exposure_threshold,
+            0.0,
         )
         self._step_turnover_cap_enabled = (
             bool(STEP_TURNOVER_CAP_ENABLED)
@@ -722,9 +751,12 @@ class SpotPortfolioEnv(gym.Env):
 
         macro_dist = float(self._macro_trend_array[self._step_idx - 1])
         cash_weight = float(new_weights[-1])
+        risk_exposure = float(new_weights[:-1].sum())
         opportunity_cost = 0.0
         if macro_dist > 0.02 and cash_weight > 0.5:
             opportunity_cost = (cash_weight - 0.5) * macro_dist * 5.0
+        cash_buffer_t = max(0.0, cash_weight - float(self._reward_cash_buffer_threshold))
+        risk_exposure_t = max(0.0, risk_exposure - float(self._reward_risk_exposure_threshold))
 
         reward = (
             (float(self._reward_weights.get("profit", 1.0)) * profit_t)
@@ -733,6 +765,8 @@ class SpotPortfolioEnv(gym.Env):
             - (float(self._reward_action_delta_weight) * effective_action_delta)
             - (float(self._reward_weights.get("missed_opportunity", 0.0)) * opportunity_cost)
             - (float(self._reward_weights.get("tail_loss", 0.0)) * tail_loss_t)
+            + (float(self._reward_cash_buffer_weight) * cash_buffer_t)
+            - (float(self._reward_risk_exposure_weight) * risk_exposure_t)
         )
         components = {
             "raw_log_return": raw_log_return,
@@ -742,6 +776,8 @@ class SpotPortfolioEnv(gym.Env):
             "raw_action_delta": raw_action_delta,
             "action_delta_component": effective_action_delta,
             "opportunity_component": opportunity_cost,
+            "cash_buffer_component": cash_buffer_t,
+            "risk_exposure_component": risk_exposure_t,
             "tail_loss_component": tail_loss_t,
         }
         return float(reward), components
