@@ -66,7 +66,7 @@ Preserved artifacts:
 |---|---:|---:|---:|---:|---:|---|
 | live_like_1x | 214.6796% | 2.1349 | -16.3875% | 4,339 | 87 | ABSTAIN |
 | live_like_2x | 74.9134% | 1.1251 | -21.1474% | 3,961 | 109 | ABSTAIN |
-| live_like_3x | -16.0124% | -0.5769 | -32.3859% | 3,262 | 26 | ABSTAIN |
+| live_like_3x | -16.0124% | -0.5769 | -32.3859% | 3,262 | 213 | ABSTAIN |
 
 Compared with the previous best hold-gate-only challenger:
 
@@ -81,7 +81,7 @@ Interpretation:
 - The stricter hold gate improved 2x return, 2x Sharpe, 2x drawdown, severe 3x return, and severe 3x drawdown.
 - It sacrificed 1x upside, which is acceptable for reliability work.
 - Severe 3x Sharpe worsened slightly and remains negative, so this is not a promotion candidate yet.
-- Severe 3x cost-bearing steps dropped from `4,148` to `3,262`, and trade events dropped from `49` to `26`.
+- Severe 3x cost-bearing steps dropped from `4,148` to `3,262`, but the closed-trade event count increased from `49` to `213`; treat this as improved cost-bearing exposure, not universally lower churn.
 
 ## Promotion gate
 
