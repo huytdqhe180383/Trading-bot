@@ -81,6 +81,14 @@ class AnalystService:
             for row in self.store.load_signals(limit=limit or self.event_limit)
         ]
 
+    def build_multi_agent_views(self, prompt_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Run the existing background analyst roles for another planner.
+
+        The execution planner owns the executable schema and confirmation gate;
+        these roles remain directional/contextual and cannot emit an order.
+        """
+        return self._build_auxiliary_views(dict(prompt_payload))
+
     def run_update(
         self,
         *,

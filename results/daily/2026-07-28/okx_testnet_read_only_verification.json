@@ -1,0 +1,20 @@
+{
+  "date": "2026-07-28",
+  "mode": "testnet",
+  "source": "okx_demo_private",
+  "configured": true,
+  "private_account_counts": {
+    "non_zero_balances": 4,
+    "open_spot_orders": 0,
+    "open_positions": 0
+  },
+  "market_context": {
+    "instrument": "BTC-USDT",
+    "state": "live",
+    "orderbook_levels": {
+      "bids": 20,
+      "asks": 20
+    }
+  },
+  "orders_submitted": 0
+}

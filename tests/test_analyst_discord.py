@@ -71,6 +71,47 @@ class DiscordAnalystTest(unittest.TestCase):
             ["analyst:explain:abc123", "analyst:validate:abc123", "analyst:news:abc123"],
         )
 
+    def test_notifier_sends_order_confirmation_buttons(self):
+        calls = []
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+        def post(url, **kwargs):
+            calls.append((url, kwargs))
+            return Response()
+
+        config = DiscordAnalystConfig("token", "app", "guild", "10", "20", frozenset({"1"}))
+        event = AnalystEvent(
+            id="event-1",
+            event_type="order_suggestion",
+            status="pending",
+            title="BTC-USDT order suggestion awaiting confirmation",
+            message="Small demo order.",
+            symbol="BTCUSDT",
+            payload={
+                "suggestion_id": "suggest-1",
+                "order": {
+                    "inst_id": "BTC-USDT",
+                    "side": "buy",
+                    "ord_type": "market",
+                    "size": "50",
+                    "size_unit": "quote",
+                    "slippage_pct": "0.005",
+                    "estimated_notional_usdt": "50",
+                },
+            },
+        )
+
+        sent = DiscordNotifier(config=config, post=post).send_order_suggestion(event)
+
+        self.assertTrue(sent)
+        payload = calls[0][1]["json"]
+        button_ids = [item["custom_id"] for item in payload["components"][0]["components"]]
+        self.assertEqual(button_ids, ["order:confirm:suggest-1", "order:reject:suggest-1"])
+        self.assertIn("Max slippage: 0.50%", payload["content"])
+
     def test_rss_parser_formats_news(self):
         items = _parse_rss(
             """

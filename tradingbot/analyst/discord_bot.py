@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,7 @@ from config import (
 )
 
 from .service import AnalystService, create_default_analyst_service
+from tradingbot.execution.service import create_default_execution_service
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,27 @@ class DiscordAnalystBot:
         suffix = f"\nRecommendation: {recommendation}" if recommendation else ""
         return f"{title}{suffix}\n{message}"
 
+    def format_order_event(self, event: Any) -> str:
+        data = event.to_public_dict() if hasattr(event, "to_public_dict") else dict(event)
+        payload = data.get("payload", {}) if isinstance(data.get("payload", {}), dict) else {}
+        order = payload.get("order", {}) if isinstance(payload.get("order", {}), dict) else {}
+        lines = [str(data.get("title", "Order suggestion")), str(data.get("message", ""))]
+        if order:
+            lines.extend(
+                [
+                    f"Instrument: {order.get('inst_id', data.get('symbol', ''))}",
+                    f"Side/type: {str(order.get('side', '')).upper()} / {str(order.get('ord_type', '')).upper()}",
+                    f"Size: {order.get('size', '')} {order.get('size_unit', '')}",
+                    f"Limit price: {order.get('price') or 'market'}",
+                    f"Max slippage: {_pct(order.get('slippage_pct', 0))}",
+                    f"Estimated notional: {order.get('estimated_notional_usdt', 'n/a')} USDT",
+                ]
+            )
+        if payload.get("expires_at_utc"):
+            lines.append(f"Expires: {payload['expires_at_utc']}")
+        lines.append("Demo only. Confirming will re-check balance, open orders, positions, liquidity, and slippage.")
+        return "\n".join(line for line in lines if line)[:1900]
+
 
 class DiscordNotifier:
     """Bot-token Discord notifier with analyst action buttons."""
@@ -106,6 +129,31 @@ class DiscordNotifier:
         response.raise_for_status()
         return True
 
+    def send_order_suggestion(self, event: Any) -> bool:
+        if not self.enabled():
+            return False
+        formatter = DiscordAnalystBot(service=None, config=self.config)
+        data = event.to_public_dict() if hasattr(event, "to_public_dict") else dict(event)
+        suggestion_id = str(data.get("payload", {}).get("suggestion_id", ""))
+        if not suggestion_id:
+            return False
+        payload = {
+            "content": formatter.format_order_event(event),
+            "components": [_order_button_row(suggestion_id)],
+            "allowed_mentions": {"parse": []},
+        }
+        response = self._post(
+            f"{self.api_base}/channels/{self.config.alert_channel_id}/messages",
+            headers={
+                "Authorization": f"Bot {self.config.bot_token}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return True
+
 
 def _button_row(alert_id: str) -> dict[str, Any]:
     return {
@@ -116,6 +164,45 @@ def _button_row(alert_id: str) -> dict[str, Any]:
             {"type": 2, "style": 2, "label": "Latest news", "custom_id": f"analyst:news:{alert_id}"},
         ],
     }
+
+
+def _order_button_row(suggestion_id: str) -> dict[str, Any]:
+    return {
+        "type": 1,
+        "components": [
+            {"type": 2, "style": 3, "label": "Confirm & submit demo order", "custom_id": f"order:confirm:{suggestion_id}"},
+            {"type": 2, "style": 4, "label": "Reject", "custom_id": f"order:reject:{suggestion_id}"},
+        ],
+    }
+
+
+def _pct(value: Any) -> str:
+    try:
+        return f"{float(value) * 100:.2f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def format_account_context(context: dict[str, Any]) -> str:
+    lines = ["OKX demo account snapshot", f"As of: {context.get('as_of_utc', 'n/a')}"]
+    account = context.get("account", {})
+    if account.get("totalEq"):
+        lines.append(f"Total equity: {account['totalEq']}")
+    balances = context.get("balances", [])
+    lines.append("Balances:")
+    lines.extend(
+        f"- {row.get('ccy', '')}: available {row.get('avail_bal', '0')}, equity {row.get('equity', '0')}"
+        for row in balances[:12]
+    )
+    orders = context.get("open_orders", [])
+    lines.append(f"Open spot orders: {len(orders)}")
+    for row in orders[:8]:
+        lines.append(f"- {row.get('instId', '')} {str(row.get('side', '')).upper()} {row.get('sz', '')} {row.get('state', '')}")
+    positions = context.get("positions", [])
+    lines.append(f"Open positions: {len(positions)}")
+    for row in positions[:8]:
+        lines.append(f"- {row.get('instId', '')} {row.get('pos', '')} avg {row.get('avgPx', '')} UPL {row.get('upl', '')}")
+    return "\n".join(lines)[:1900]
 
 
 def run_discord_bot() -> None:
@@ -132,6 +219,8 @@ def run_discord_bot() -> None:
 
     service = create_default_analyst_service()
     bridge = DiscordAnalystBot(service=service, config=config)
+    execution_service = create_default_execution_service(analyst_service=service)
+    notifier = DiscordNotifier(config=config)
     intents = discord.Intents.default()
     client = discord.Client(intents=intents, application_id=int(config.application_id or 0))
     tree = app_commands.CommandTree(client)
@@ -191,17 +280,74 @@ def run_discord_bot() -> None:
         event = service.latest_news(symbol=symbol)
         await _reply(interaction, bridge.format_event(event))
 
+    @tree.command(name="account", description="Show the private OKX demo account snapshot.")
+    async def account_cmd(interaction: discord.Interaction, symbol: str = "ALL") -> None:
+        _check(interaction)
+        await interaction.response.defer(ephemeral=True)
+        context = await asyncio.to_thread(
+            execution_service.account_context,
+            symbol="" if str(symbol).strip().upper() == "ALL" else symbol,
+        )
+        await interaction.followup.send(format_account_context(context), ephemeral=True)
+
+    @tree.command(name="suggest", description="Ask the multi-agent planner for a confirmed demo order suggestion.")
+    async def suggest_cmd(interaction: discord.Interaction, instruction: str, symbol: str = "BTCUSDT") -> None:
+        _check(interaction)
+        await interaction.response.defer(ephemeral=True)
+        event = await asyncio.to_thread(
+            execution_service.suggest_order,
+            symbol=symbol,
+            instruction=instruction,
+            requested_by=str(interaction.user.id),
+        )
+        sent = False
+        dispatch_error = ""
+        if event.status == "pending":
+            try:
+                sent = await asyncio.to_thread(notifier.send_order_suggestion, event)
+            except Exception as exc:
+                dispatch_error = f"Suggestion created but Discord dispatch failed: {exc}"[:1900]
+        if dispatch_error:
+            await interaction.followup.send(dispatch_error, ephemeral=True)
+        elif sent:
+            await interaction.followup.send(
+                f"Suggestion `{event.payload.get('suggestion_id', '')}` sent to the confirmation channel.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(bridge.format_order_event(event), ephemeral=True)
+
     @client.event
     async def on_interaction(interaction: discord.Interaction) -> None:
         if interaction.type != discord.InteractionType.component:
             return
-        custom_id = str(getattr(interaction.data, "get", lambda key, default=None: default)("custom_id", ""))
-        if not custom_id.startswith("analyst:"):
+        data = getattr(interaction, "data", {}) or {}
+        custom_id = str(data.get("custom_id", "")) if isinstance(data, dict) else ""
+        if not custom_id.startswith(("analyst:", "order:")):
             return
         _check(interaction)
         parts = custom_id.split(":", 2)
         action = parts[1] if len(parts) > 1 else ""
         alert_id = parts[2] if len(parts) > 2 else ""
+        if custom_id.startswith("order:"):
+            await interaction.response.defer(ephemeral=True)
+            if action == "confirm":
+                event = await asyncio.to_thread(
+                    execution_service.confirm_order,
+                    suggestion_id=alert_id,
+                    requested_by=str(interaction.user.id),
+                )
+            elif action == "reject":
+                event = await asyncio.to_thread(
+                    execution_service.reject_order,
+                    suggestion_id=alert_id,
+                    requested_by=str(interaction.user.id),
+                )
+            else:
+                await interaction.followup.send("Unsupported order action.", ephemeral=True)
+                return
+            await interaction.followup.send(bridge.format_order_event(event), ephemeral=True)
+            return
         if action == "explain":
             event = service.explain(alert_id=alert_id)
             await _reply(interaction, bridge.format_event(event))

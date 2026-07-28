@@ -160,12 +160,20 @@ python scripts/live_daily_report.py --last-hours 24
 python scripts/live_daily_report.py --full-history
 ```
 
-## analyst-only Discord and frontend API
+## analyst Discord, OKX account context, and confirmed demo orders
 
-The analyst runtime is advisory only. It uses public market data and an
-OpenAI-compatible `/v1/chat/completions` provider, writes canonical analyst
-events, and exposes UI/Discord responses. It does not build orders, mutate RL
-weights, or feed LLM output into live execution.
+The normal analyst runtime remains advisory-only. A separate execution-planning
+boundary can read the configured OKX demo account (balances, open spot orders,
+and positions), pass that private context plus market/news data to the existing
+multi-agent LLM roles, and create a bounded order suggestion. It never submits
+an order from LLM output alone.
+
+The Discord `/suggest` command sends a confirmation message with Confirm and
+Reject buttons. Confirm is restricted to the requesting allowlisted Discord
+user, expires after `ORDER_SUGGESTION_TTL_SECS`, re-fetches account/open-order/
+position/order-book state, checks available funds and visible depth, and only
+then submits to OKX demo trading. Market orders use OKX's native `slippagePct`
+and the local depth estimate must also stay within `OKX_MAX_SLIPPAGE_PCT`.
 
 Important failure rule: provider errors, invalid JSON/schema, and budget
 exhaustion are recorded as errors. The analyst runtime does not invent fallback
@@ -177,6 +185,27 @@ Entrypoints:
 python scripts/run_analyst.py --max-cycles 1
 python scripts/run_analyst_discord.py
 ```
+
+Discord commands:
+
+```text
+/account symbol:ALL
+/suggest symbol:BTCUSDT instruction:"buy a small BTC demo position with no more than 50 USDT"
+```
+
+The confirmed order path is demo-only and uses these safety settings:
+
+- `TRADING_MODE=testnet`
+- `OKX_EXECUTION_ENABLED=true`
+- `OKX_MAX_SLIPPAGE_PCT=0.005` (0.50%)
+- `OKX_MAX_ORDER_NOTIONAL_USDT=100`
+- `ORDER_SUGGESTION_TTL_SECS=900`
+
+`OKX_TESTNET_API_KEY`, `OKX_TESTNET_SECRET_KEY`, and
+`OKX_TESTNET_PASSPHRASE` are loaded from `.env`; the secrets are never put in
+LLM prompts, Discord messages, reports, or result snapshots. The private
+account snapshot itself is sent to the configured `LLM_BASE_URL` for
+execution planning, so use a provider you trust for account data.
 
 Main env:
 

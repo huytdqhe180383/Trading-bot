@@ -68,6 +68,8 @@ INITIAL_CAPITAL = 10_000.0
 
 PRIMARY_EXCHANGE = "okx"
 SUPPORTED_EXCHANGES = ["okx"]
+TRADING_MODE = _env_str("TRADING_MODE", "testnet").lower()
+OKX_API_BASE_URL = _env_str("OKX_API_BASE_URL", "https://openapi.okx.com")
 
 # Exchange fee model
 BINANCE_TAKER_FEE = 0.001
@@ -277,6 +279,17 @@ DISCORD_GUILD_ID = _env_str("DISCORD_GUILD_ID", "")
 DISCORD_ALERT_CHANNEL_ID = _env_str("DISCORD_ALERT_CHANNEL_ID", "")
 DISCORD_ANALYST_CHANNEL_ID = _env_str("DISCORD_ANALYST_CHANNEL_ID", "")
 DISCORD_ALLOWED_USER_IDS = _env_csv("DISCORD_ALLOWED_USER_IDS", ())
+
+# ============================================================
+# CONFIRMED OKX DEMO ORDER FLOW
+# ============================================================
+# The execution boundary is deliberately demo-only. A production account can
+# still be used by the existing live runner, but the LLM/Discord confirmation
+# flow refuses to submit against it.
+OKX_EXECUTION_ENABLED = _env_bool("OKX_EXECUTION_ENABLED", TRADING_MODE == "testnet")
+OKX_MAX_SLIPPAGE_PCT = _env_float("OKX_MAX_SLIPPAGE_PCT", 0.005)
+OKX_MAX_ORDER_NOTIONAL_USDT = _env_float("OKX_MAX_ORDER_NOTIONAL_USDT", 100.0)
+ORDER_SUGGESTION_TTL_SECS = _env_int("ORDER_SUGGESTION_TTL_SECS", 900)
 
 # ============================================================
 # SIGNAL INTEGRATION (Kronos + TradingAgents + Meta-Fusion)
