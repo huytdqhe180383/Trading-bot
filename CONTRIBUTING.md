@@ -9,7 +9,7 @@ financially sensitive, even when it only touches backtests.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 Never commit `.env`, raw market data, model checkpoints, logs, or generated
@@ -17,10 +17,10 @@ result artifacts.
 
 ## Checks
 
-Run the unit suite before committing:
+Run the test suite before committing:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests
+python -m pytest -q
 ```
 
 Run a syntax check for touched Python files when making small targeted edits:
@@ -32,8 +32,18 @@ Run a syntax check for touched Python files when making small targeted edits:
 If Ruff is installed, run:
 
 ```powershell
-.\.venv\Scripts\ruff.exe check .
+python -m ruff check .
 ```
+
+When changing operational persistence, also run:
+
+```powershell
+python -m pytest tests/test_operational_storage.py tests/test_analyst_service.py tests/test_okx_execution.py -q
+```
+
+See [Repository map](docs/development/repository_map.md) before adding a new
+top-level module. Reusable application behavior belongs under `tradingbot/`;
+operator scripts should remain thin.
 
 ## Backtest Discipline
 
@@ -45,10 +55,13 @@ If Ruff is installed, run:
 
 ## Reporting
 
-Save notable runs under `report/` with:
+Save notable runs under the canonical daily or important report folders with:
 
 - command used
 - model checkpoint/version
 - key metrics
 - log paths
 - known warnings or unavailable providers
+
+Generated result snapshots follow the same `daily/YYYY-MM-DD` or `important`
+split under `results/`. Never commit the local operational SQLite database.

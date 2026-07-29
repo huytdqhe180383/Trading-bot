@@ -11,6 +11,7 @@ from typing import Any
 
 from config import (
     OKX_EXECUTION_ENABLED,
+    OPERATIONAL_DATABASE_PATH,
     ORDER_SUGGESTION_TTL_SECS,
     LIVE_SESSION_TIMEZONE,
     RESULTS_DIR,
@@ -255,7 +256,7 @@ class TradingExecutionService:
                 payload={"suggestion_id": suggestion_id, "status": record.get("status")},
             )
         if _parse_timestamp(record.get("expires_at_utc")) <= time.time():
-            self.suggestion_store.update(suggestion_id, status="expired")
+            self.suggestion_store.expire(suggestion_id)
             return self._event(
                 event_type="order_confirmation",
                 status="expired",
@@ -273,6 +274,18 @@ class TradingExecutionService:
                 error_code="execution_disabled",
                 payload={"suggestion_id": suggestion_id},
             )
+        claimed = self.suggestion_store.claim_for_confirmation(suggestion_id, requested_by)
+        if claimed is None:
+            latest = self.suggestion_store.get(suggestion_id) or {}
+            return self._event(
+                event_type="order_confirmation",
+                status="error",
+                title="Order confirmation unavailable",
+                message=f"This suggestion is already {latest.get('status', 'closed')}.",
+                error_code="not_pending",
+                payload={"suggestion_id": suggestion_id, "status": latest.get("status", "closed")},
+            )
+        record = claimed
         try:
             order = dict(record["order"])
             instrument = self.okx.fetch_instrument(order["inst_id"])
@@ -359,7 +372,17 @@ class TradingExecutionService:
                 message=f"This suggestion is already {record.get('status', 'closed')}.",
                 error_code="not_pending",
             )
-        self.suggestion_store.update(suggestion_id, status="rejected")
+        rejected = self.suggestion_store.reject(suggestion_id, requested_by)
+        if rejected is None:
+            latest = self.suggestion_store.get(suggestion_id) or {}
+            return self._event(
+                event_type="order_rejection",
+                status="error",
+                title="Order rejection unavailable",
+                message=f"This suggestion is already {latest.get('status', 'closed')}.",
+                error_code="not_pending",
+                payload={"suggestion_id": suggestion_id, "status": latest.get("status", "closed")},
+            )
         return self._event(
             event_type="order_rejection",
             status="rejected",
@@ -462,7 +485,11 @@ def create_default_execution_service(*, analyst_service: AnalystService) -> Trad
     return TradingExecutionService(
         analyst_service=analyst_service,
         okx_client=OKXDemoClient(),
-        suggestion_store=OrderSuggestionStore(results_dir=RESULTS_DIR, tz_name=LIVE_SESSION_TIMEZONE),
+        suggestion_store=OrderSuggestionStore(
+            results_dir=RESULTS_DIR,
+            tz_name=LIVE_SESSION_TIMEZONE,
+            database_path=OPERATIONAL_DATABASE_PATH,
+        ),
         event_store=analyst_service.store,
         execution_enabled=OKX_EXECUTION_ENABLED,
         suggestion_ttl_secs=ORDER_SUGGESTION_TTL_SECS,

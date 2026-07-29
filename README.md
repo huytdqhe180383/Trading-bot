@@ -1,391 +1,91 @@
-# BTC/ETH Trading Research System
+# BTC/ETH Trading System
 
-This repository runs a BTC/ETH spot allocation strategy with PPO/SAC base RL,
-plus optional Kronos and TradingAgents signal fusion for inference.
+An OKX-first research and operations system for BTC/ETH spot allocation. PPO
+and SAC propose portfolio weights; execution controls decide whether a proposed
+change is safe to send. Kronos and LLM-based analysis are optional context, not
+fallback trading strategies.
 
-Primary runtime is now OKX-first. Legacy Binance-specific scripts are archived
-under `archive/binance_legacy/`.
+The current RL candidate is **not promoted**. LLM agents must treat RL evidence
+with status `ABSTAIN` as no RL opinion.
 
-## Architecture
+## Start Here
 
-```text
-data/download_historical.py     -> CCXT historical OHLCV (default: OKX)
-data/preprocess.py              -> multi-timeframe feature engineering
-train.py                        -> PPO/SAC training (GPU-capable)
-agents/ensemble_agent.py        -> RL ensemble allocation
-adapters/kronos_adapter.py      -> Kronos forecast adapter (fallback-safe)
-adapters/tradingagents_adapter.py -> TradingAgents adapter (fallback-safe)
-adapters/llm_risk_gate_adapter.py -> low-cadence local LLM risk gate (Ollama)
-agents/meta_fusion_agent.py     -> RL + overlays fusion (Kronos / TradingAgents / LLM risk gate)
-tradingbot/runtime/artifacts.py -> shared report/result session artifact helpers
-tradingbot/reports/live_daily.py -> compact live report builder used by CLI and UI
-tradingbot/apps/                -> stable lazy application entrypoints
-backtest.py                     -> ablations + realism profiles + reports
-environment/trading_env.py      -> `SpotPortfolioEnv` generic spot portfolio env
-scripts/run_live.py             -> canonical live/testnet execution runner
-run_live.py                     -> compatibility wrapper to scripts/run_live.py
-```
+- [Documentation map](docs/README.md)
+- [Repository map](docs/development/repository_map.md)
+- [Architecture](docs/architecture.md)
+- [Operational persistence](docs/architecture/persistence.md)
+- [Domain language](CONTEXT.md)
 
-## setup
+## Setup
+
+Python 3.12 is the supported baseline.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 Copy-Item .env.example .env
 ```
 
-For a small live-only server deployment, use `requirements-live.txt` instead of
-the full research stack in `requirements.txt`.
+Use `requirements.txt` when tests and linting are unnecessary. Use
+`requirements-live.txt` on a small server that will not train models.
 
-Prepare data:
+## Common Commands
+
+Prepare market data:
 
 ```powershell
 python -m data.download_historical --exchange okx
 python -m data.preprocess
 ```
 
-External integrations:
-
-```powershell
-# Kronos is source-based (not a pip package): clone once and point env var.
-git clone https://github.com/shiyu-coder/Kronos.git external/Kronos
-$env:KRONOS_REPO_PATH = (Resolve-Path .\external\Kronos).Path
-```
-
-## training
-
-GPU-capable training command:
+Train and evaluate:
 
 ```powershell
 python train.py --algo ALL --device auto --require-gpu
+python backtest.py --pipeline rl_only --realism-profile live_like --method dynamic_weighted
 ```
 
-By default, `train.py` now runs a post-training RL-only, live-like backtest
-using the configured ensemble default (`dynamic_weighted`). To train without
-the automatic backtest:
-
-```powershell
-python train.py --algo ALL --device auto --skip-backtest
-```
-
-If GPU is unavailable and you still want a CPU run:
-
-```powershell
-python train.py --algo ALL --device cpu
-```
-
-## backtest
-
-Single pipeline run:
-
-```powershell
-python backtest.py --pipeline rl_full --realism-profile live_like --method dynamic_weighted
-python backtest.py --pipeline rl_llm_risk_gate --realism-profile live_like --method dynamic_weighted
-```
-
-Run all ablations for a profile:
-
-```powershell
-python backtest.py --run-matrix --realism-profile live_like --method dynamic_weighted
-```
-
-Diagnose realism drift between baseline and live-like assumptions:
-
-```powershell
-python backtest.py --diagnose-realism --method dynamic_weighted
-```
-
-Compare all ensemble aggregation methods and generate a combined plot:
-
-```powershell
-python backtest.py --compare-ensemble-methods --realism-profile live_like
-```
-
-Outputs go to `results/`, including:
-
-- `backtest_metrics.csv`
-- `backtest_episode.parquet`
-- `backtest_matrix_metrics.csv`
-- `backtest_realism_report.csv`
-- `backtest_ensemble_method_comparison.csv`
-- `backtest_ensemble_method_comparison.png`
-- `equity_curve.png`
-- `kpi_target_radar.png`
-
-LLM risk gate (research mode defaults):
-
-- `LLM_RISK_GATE_ENABLED = True`
-- `LLM_RISK_GATE_CADENCE = "weekly"`
-- `LLM_RISK_GATE_MODE = "de_risk"`
-- `LLM_RISK_GATE_TIMEOUT_SECS = 5.0`
-- On timeout/unavailable provider, fallback is `allow` (no override), so RL remains authoritative.
-
-## live execution
-
-Primary runner (OKX default):
-
-```powershell
-python run_live.py --exchange okx --mode testnet --dry-run --max-cycles 1
-```
-
-Current live baseline:
-
-- model source: `models/live_baseline`
-- method: `dynamic_weighted`
-- overlays: disabled by default (`ENABLE_KRONOS=false`, `ENABLE_TRADINGAGENTS=false`)
-- execution controls: adaptive threshold + cooldown + reversal hysteresis + delayed position-reset reset
-- live session timezone: `Asia/Bangkok` by default (`LIVE_SESSION_TIMEZONE`)
-
-Paper/dry-run verification without private credentials:
+Run one safe testnet cycle:
 
 ```powershell
 python run_live.py --exchange okx --mode testnet --dry-run --max-cycles 1 --bootstrap-usdt 10000
 ```
 
-Enable/disable fusion components:
-
-```powershell
-python run_live.py --enable-kronos --enable-tradingagents
-python run_live.py --disable-kronos --disable-tradingagents
-```
-
-Daily live report:
-
-```powershell
-python scripts/live_daily_report.py --date 2026-05-31
-python scripts/live_daily_report.py --date 2026-05-31 --export
-python scripts/live_daily_report.py --last-hours 24
-python scripts/live_daily_report.py --full-history
-```
-
-## analyst Discord, OKX account context, and confirmed demo orders
-
-The normal analyst runtime remains advisory-only. A separate execution-planning
-boundary can read the configured OKX demo account (balances, open spot orders,
-and positions), pass that private context plus market/news data to the existing
-multi-agent LLM roles, and create a bounded order suggestion. It never submits
-an order from LLM output alone.
-
-The Discord `/suggest` command sends a confirmation message with Confirm and
-Reject buttons. Confirm is restricted to the requesting allowlisted Discord
-user, expires after `ORDER_SUGGESTION_TTL_SECS`, re-fetches account/open-order/
-position/order-book state, checks available funds and visible depth, and only
-then submits to OKX demo trading. Market orders use OKX's native `slippagePct`
-and the local depth estimate must also stay within `OKX_MAX_SLIPPAGE_PCT`.
-
-Important failure rule: provider errors, invalid JSON/schema, and budget
-exhaustion are recorded as errors. The analyst runtime does not invent fallback
-BUY/SELL/HOLD/ALLOW decisions.
-
-Entrypoints:
+Run advisory interfaces:
 
 ```powershell
 python scripts/run_analyst.py --max-cycles 1
 python scripts/run_analyst_discord.py
-```
-
-Discord commands:
-
-```text
-/account symbol:ALL
-/suggest symbol:BTCUSDT instruction:"buy a small BTC demo position with no more than 50 USDT"
-```
-
-The confirmed order path is demo-only and uses these safety settings:
-
-- `TRADING_MODE=testnet`
-- `OKX_EXECUTION_ENABLED=true`
-- `OKX_MAX_SLIPPAGE_PCT=0.005` (0.50%)
-- `OKX_MAX_ORDER_NOTIONAL_USDT=100`
-- `ORDER_SUGGESTION_TTL_SECS=900`
-
-`OKX_TESTNET_API_KEY`, `OKX_TESTNET_SECRET_KEY`, and
-`OKX_TESTNET_PASSPHRASE` are loaded from `.env`; the secrets are never put in
-LLM prompts, Discord messages, reports, or result snapshots. The private
-account snapshot itself is sent to the configured `LLM_BASE_URL` for
-execution planning, so use a provider you trust for account data.
-
-Main env:
-
-- `LLM_BASE_URL`
-- `LLM_API_KEY`
-- `LLM_MODEL`
-- `LLM_TIMEOUT_SECS`
-- `LLM_DAILY_CALL_BUDGET`
-- `LLM_INTERACTIVE_CALL_BUDGET`
-- `DISCORD_BOT_TOKEN`
-- `DISCORD_APPLICATION_ID`
-- `DISCORD_GUILD_ID`
-- `DISCORD_ALERT_CHANNEL_ID`
-- `DISCORD_ANALYST_CHANNEL_ID`
-- `DISCORD_ALLOWED_USER_IDS`
-
-Private UI analyst API:
-
-- `GET /api/analyst/status`
-- `POST /api/analyst/run`
-- `GET /api/analyst/events`
-- `GET /api/analyst/signals`
-- `GET /api/analyst/budget`
-- `WS /ws/analyst`
-
-## private UI
-
-The repository now includes a private, phone-friendly web UI/PWA for bot
-operations.
-
-Current security posture:
-
-- private use only
-- Tailscale-first shared access
-- Tailscale-only deployment recommended
-- no public ingress
-- admin-only controls, viewer-safe sharing
-
-Main entrypoints:
-
-- `python scripts/run_ui.py`
-- `scripts/server/trading-bot-ui.service.example`
-
-Required UI env:
-
-- `UI_USERNAME`
-- `UI_PASSWORD`
-- `UI_SESSION_SECRET`
-- `UI_BIND_HOST`
-- `UI_PORT`
-- `UI_ENABLE_CONTROLS`
-- `UI_TRUST_TAILSCALE_HEADERS`
-- `UI_ALLOWED_TAILSCALE_USERS`
-- `UI_ADMIN_TAILSCALE_USERS`
-
-Recommended shared-access model:
-
-- keep the app bound to `127.0.0.1`
-- publish it with `tailscale serve`
-- allow friends through `UI_ALLOWED_TAILSCALE_USERS`
-- keep bot-control rights limited to `UI_ADMIN_TAILSCALE_USERS`
-
-Important scope note:
-
-- this UI manages one server-side bot instance
-- that bot is connected to one OKX account on the server
-- if each friend needs their own separate OKX credentials and their own bot,
-  that is a later multi-tenant architecture change, not this deploy
-
-Related docs:
-
-- `docs/digitalocean_private_ui_deployment_guide.md`
-- `docs/shared_private_ui_tailscale_guide.md`
-- `report/important/secure_private_ui_security_baseline.md`
-
-## TradingView-style analyst web UI
-
-The `frontend/` app is a chart-first analyst dashboard inspired by the LDM
-TradingView-style UI. It uses this repository as the authority for market data
-and analyst interaction:
-
-- OKX public candles from `GET /api/market/candles`
-- analyst events from `GET /api/analyst/events`
-- analyst commands through `POST /api/analyst/run`
-- live analyst event hydration through `WS /ws/analyst`
-
-Local run:
-
-```powershell
 python scripts/run_ui.py
-cd frontend
-npm install
-npm run dev
 ```
 
-Restart both local servers after changing `.env`:
+## Storage Model
+
+- `data/raw/` and `data/processed/`: local market data.
+- `models/`: local checkpoints and promoted model copies.
+- `results/daily/YYYY-MM-DD/`: reproducible run artifacts such as CSV and parquet.
+- `report/daily/YYYY-MM-DD/`: human-readable daily reports.
+- `results/runtime/tradingbot.sqlite3`: mutable operational state and query index.
+- `logs/`: process logs.
+
+Research artifacts remain files so experiments can be inspected and reproduced.
+SQLite owns mutable analyst events, order-suggestion state, and the live-decision
+query index. Override its location with `OPERATIONAL_DATABASE_PATH`.
+
+## Verification
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restart_analyst_web.ps1
+python -m pytest -q
+python -m ruff check .
 ```
 
-Then open `http://127.0.0.1:3000`. If the dashboard asks you to log in, use the
-backend login at `http://127.0.0.1:8080/login` first so the frontend can reuse
-the private UI session cookie.
+See [Contributing](CONTRIBUTING.md) for safety and reporting rules.
 
-Frontend env:
+## Safety
 
-- `NEXT_PUBLIC_API_URL=http://127.0.0.1:8080`
-- `NEXT_PUBLIC_WS_URL=ws://127.0.0.1:8080/ws/analyst`
-- `NEXT_PUBLIC_CANDLE_REFRESH_MS=5000`
-- `UI_CORS_ALLOWED_ORIGINS=http://127.0.0.1:3000,http://localhost:3000`
-- `ANALYST_SCAN_INTERVAL_SECS=300`
-- `ANALYST_BACKGROUND_ANALYSIS_CADENCE=5m`
-- `LLM_BACKGROUND_MODEL=<cheaper/faster model for scanner alerts>`
-- `LLM_INTERACTIVE_MODEL=<stronger model for chat, explain, validate, deep analysis>`
-- `LLM_USE_RESPONSE_FORMAT=false` for OpenAI-compatible providers/models that do not reliably support `response_format`
-
-Scope guardrails:
-
-- chart data uses OKX public endpoints only
-- chart candles refresh in-place without page reload
-- no exchange credentials are exposed to the frontend
-- sidebar actions are advisory only
-- LLM errors remain visible errors; no fallback recommendation is generated
-
-TradingAgents local research mode:
-
-- `TRADINGAGENTS_PROVIDER_FALLBACKS` in `config.py` controls order.
-- Research default order is `ollama` only; no ShopAI calls are made by default.
-- `ollama` is supported through `OLLAMA_BASE_URL`
-  with `OLLAMA_MODEL` (default `qwen3.5:4b-gpu8k`; `qwen-3.5-4b` is accepted as an alias).
-- The recommended local model profile is built from `ollama/qwen3.5-4b-gpu8k.Modelfile`
-  to cap context at 8k and keep the model fully GPU-resident.
-- Dormant ShopAI support remains in the adapter for future deployment, but it
-  must be enabled explicitly and is intentionally absent from research defaults.
-- If Ollama is unavailable, TradingAgents returns no signal and the portfolio
-  remains RL-only for that layer. There is no heuristic trading fallback.
-
-## current results
-
-The repository includes historical artifacts under `results/`, but you should
-rerun training/backtest in your active environment before making deployment
-decisions.
-
-## agent cost estimate
-
-```powershell
-python scripts/estimate_agent_cost.py
-```
-
-## rx6700xt training
-
-Check stack readiness:
-
-```powershell
-python scripts/verify_gpu_training_stack.py
-```
-
-Detailed ROCm notes:
-
-- `docs/rocm_runtime_architecture.md`
-- `docs/rx6700xt_rocm_training.md`
-
-## git and data hygiene
-
-Keep secrets, raw market data, model artifacts, and logs out of commits.
-
-- `.env` should never be committed.
-- `data/raw`, `data/processed`, `models`, `results`, and `logs` are generated.
-
-## documentation
-
-- `CONTEXT.md`
-- `docs/README.md`
-- `docs/architecture/runtime_spine.md`
-- `docs/adr/0001-application-spine-and-artifact-runtime.md`
-- `docs/project_comprehensive_report_and_integration_plan.md`
-- `docs/codebase_audit.md`
-- `docs/architecture.md`
-- `docs/digitalocean_live_deployment_guide.md`
-- `docs/digitalocean_private_ui_deployment_guide.md`
-- `docs/rocm_runtime_architecture.md`
-- `docs/trading_env_documentation.md`
+- Never commit `.env`, credentials, raw market data, checkpoints, logs, results, or the SQLite database.
+- Missing overlays produce no signal; they do not invent a trade.
+- Discord order suggestions require an allowlisted requester, explicit confirmation, fresh account checks, and OKX demo mode.
+- Treat all performance claims as untrusted until promotion, statistical, calibration, and prospective gates pass.

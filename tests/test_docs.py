@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import unittest
 
 
@@ -10,12 +11,12 @@ class ProjectDocumentationTest(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
 
         required_sections = [
+            "## start here",
             "## setup",
-            "## backtest",
-            "## current results",
-            "## agent cost estimate",
-            "## rx6700xt training",
-            "## git and data hygiene",
+            "## common commands",
+            "## storage model",
+            "## verification",
+            "## safety",
         ]
 
         for section in required_sections:
@@ -43,13 +44,40 @@ class ProjectDocumentationTest(unittest.TestCase):
             ROOT / "CONTEXT.md",
             ROOT / "docs" / "README.md",
             ROOT / "docs" / "architecture" / "runtime_spine.md",
+            ROOT / "docs" / "architecture" / "persistence.md",
             ROOT / "docs" / "adr" / "0001-application-spine-and-artifact-runtime.md",
+            ROOT / "docs" / "adr" / "0002-operational-sqlite-and-artifact-separation.md",
+            ROOT / "docs" / "development" / "repository_map.md",
             ROOT / "scripts" / "README.md",
         ]
 
         for path in required_paths:
             with self.subTest(path=path):
                 self.assertTrue(path.exists(), f"Missing architecture navigation doc: {path}")
+
+    def test_primary_navigation_links_resolve(self):
+        for document in (ROOT / "README.md", ROOT / "docs" / "README.md"):
+            text = document.read_text(encoding="utf-8")
+            targets = re.findall(r"\[[^\]]+\]\(([^)]+)\)", text)
+            for target in targets:
+                if "://" in target or target.startswith("#"):
+                    continue
+                local_path = target.split("#", 1)[0]
+                with self.subTest(document=document, target=target):
+                    self.assertTrue((document.parent / local_path).resolve().exists())
+
+    def test_stale_point_in_time_docs_are_removed(self):
+        stale_paths = [
+            ROOT / "docs" / "codebase_audit.md",
+            ROOT / "docs" / "project_comprehensive_report_and_integration_plan.md",
+            ROOT / "docs" / "rubric.md",
+            ROOT / "docs" / "rubric_assessment.md",
+            ROOT / "docs" / "Enhancing Trading System with Research.docx",
+        ]
+
+        for path in stale_paths:
+            with self.subTest(path=path):
+                self.assertFalse(path.exists(), f"Obsolete documentation returned: {path}")
 
 
 if __name__ == "__main__":

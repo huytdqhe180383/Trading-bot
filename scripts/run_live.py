@@ -45,6 +45,7 @@ from config import (
     MODELS_DIR,
     POSITION_RESET_PERSIST_BARS,
     POSITION_RESET_WEIGHT_THRESHOLD,
+    OPERATIONAL_DATABASE_PATH,
     RESULTS_DIR,
     TRADINGAGENTS_CALL_TIMEOUT_SECS,
     TRADINGAGENTS_LIVE_CADENCE,
@@ -87,6 +88,7 @@ from tradingbot.runtime.artifacts import (
     write_json_artifact,
     write_live_session_summary as _write_live_session_summary,
 )
+from tradingbot.storage import LiveDecisionStore
 
 load_dotenv()
 
@@ -113,8 +115,15 @@ def write_live_session_metadata(session_dir: Path, metadata: dict[str, Any]) -> 
     write_json_artifact(Path(session_dir) / "live_session_metadata.json", metadata)
 
 
-def append_live_session_row(session_csv_path: Path, row: dict[str, Any]) -> None:
+def append_live_session_row(
+    session_csv_path: Path,
+    row: dict[str, Any],
+    *,
+    decision_store: LiveDecisionStore | None = None,
+) -> None:
     append_csv_row(session_csv_path, row)
+    if decision_store is not None:
+        decision_store.record(session_csv_path=session_csv_path, decision=row)
 
 
 def write_live_session_summary(session_dir: Path, rows: list[dict[str, Any]]) -> None:
@@ -505,6 +514,10 @@ def main() -> None:
     logger.add(log_file, rotation="10 MB", retention="30 days")
     session_dir = create_live_session_dir(RESULTS_DIR, run_date=args.session_date)
     session_csv_path = session_dir / f"live_trade_decisions_{args.exchange}_{args.mode}.csv"
+    decision_store = LiveDecisionStore(
+        results_dir=RESULTS_DIR,
+        database_path=OPERATIONAL_DATABASE_PATH,
+    )
     write_live_session_metadata(
         session_dir,
         {
@@ -695,7 +708,7 @@ def main() -> None:
                 "safety_gate_reasons": " | ".join(safety_reasons),
             }
             append_live_session_row(csv_log_path, row)
-            append_live_session_row(session_csv_path, row)
+            append_live_session_row(session_csv_path, row, decision_store=decision_store)
             session_rows.append(row)
             write_live_session_summary(session_dir, session_rows)
             if args.max_cycles and cycle >= args.max_cycles:
@@ -764,7 +777,7 @@ def main() -> None:
             "safety_gate_reasons": "",
         }
         append_live_session_row(csv_log_path, row)
-        append_live_session_row(session_csv_path, row)
+        append_live_session_row(session_csv_path, row, decision_store=decision_store)
         session_rows.append(row)
         write_live_session_summary(session_dir, session_rows)
         if args.max_cycles and cycle >= args.max_cycles:

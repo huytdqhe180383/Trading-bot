@@ -27,6 +27,10 @@ practical.
 - `scripts/verify_gpu_training_stack.py`: ROCm/GPU training stack verification.
 - `scripts/run_kpi_improvement_experiment.py`: historical KPI experiment runner.
 
+Operational state is owned by `tradingbot.storage`; do not add scripts that
+edit the SQLite file with ad-hoc SQL. Schema changes belong in ordered database
+migrations, and lifecycle changes belong in their domain store.
+
 ## Direction
 
 When adding new behavior, prefer:
@@ -34,4 +38,3 @@ When adding new behavior, prefer:
 1. reusable code under `tradingbot/`
 2. tests under `tests/`
 3. a thin script wrapper only when an operator command is needed
-

@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from tradingbot.storage.live_decisions import LiveDecisionStore
+
 
 def _json_default(value: Any) -> str:
     if isinstance(value, Path):
@@ -87,20 +89,9 @@ def iter_live_decision_csvs(results_dir: Path) -> Iterable[Path]:
 
 
 def load_live_decisions(results_dir: Path) -> pd.DataFrame:
-    frames: list[pd.DataFrame] = []
-    for csv_path in iter_live_decision_csvs(results_dir):
-        try:
-            df = pd.read_csv(csv_path)
-        except Exception:
-            continue
-        if df.empty or "timestamp_utc" not in df.columns:
-            continue
-        df["source_csv"] = str(csv_path)
-        df["session_dir"] = str(csv_path.parent)
-        frames.append(df)
-    if not frames:
+    rows = LiveDecisionStore(results_dir=Path(results_dir)).load()
+    if not rows:
         return pd.DataFrame()
-    out = pd.concat(frames, ignore_index=True)
+    out = pd.DataFrame(rows)
     out["timestamp_utc"] = pd.to_datetime(out["timestamp_utc"], utc=True, errors="coerce")
     return out.dropna(subset=["timestamp_utc"]).sort_values("timestamp_utc").reset_index(drop=True)
-

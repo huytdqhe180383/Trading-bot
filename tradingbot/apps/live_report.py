@@ -2,3 +2,4 @@
 
 from tradingbot.reports.live_daily import main
 
+__all__ = ["main"]

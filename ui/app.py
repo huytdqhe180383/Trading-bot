@@ -20,7 +20,6 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from config import (
-    BASE_DIR,
     LIVE_SESSION_TIMEZONE,
     LOGS_DIR,
     REPORTS_DIR,

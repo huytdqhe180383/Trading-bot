@@ -1,31 +1,84 @@
-# Project Context
+# BTC/ETH Allocation Context
 
-This repository is a BTC/ETH spot-allocation research and operations system.
-It trains PPO/SAC policies, evaluates them through backtests, and runs a
-private OKX testnet/live execution loop with optional overlays.
+This repository researches BTC/ETH spot allocation and operates a guarded OKX
+execution loop. Its language separates model proposals, execution decisions,
+reproducible artifacts, and mutable operational state.
 
-## Domain Terms
+## Language
 
-- `RL policy`: the PPO/SAC model output that proposes BTC, ETH, and cash weights.
-- `Ensemble method`: the rule that combines PPO and SAC proposals into one RL target.
-- `Execution controls`: the anti-churn layer that decides whether a requested weight change becomes an order.
-- `Strategy NAV`: the BTC, ETH, and USDT value tracked by the bot. It excludes non-strategy assets such as OKB.
-- `Live session`: one process lifetime of the live runner, stored under `results/daily/YYYY-MM-DD/N/`.
-- `Compact report`: a small JSON/Markdown summary stored under `report/daily/YYYY-MM-DD/`.
-- `Overlay`: an optional signal layer, such as Kronos, TradingAgents, or the LLM risk gate.
-- `Artifact`: a generated file from a run, including CSV logs, parquet episodes, plots, metadata, summaries, and reports.
+**RL Policy**:
+A trained PPO or SAC model that proposes BTC, ETH, and cash weights.
+_Avoid_: Bot, strategy, agent
 
-## Runtime Boundaries
+**Ensemble Allocation**:
+The combined portfolio proposal produced from PPO and SAC outputs.
+_Avoid_: Final trade, order
 
-- `tradingbot.runtime`: shared runtime helpers that must stay independent of trading strategy details.
-- `tradingbot.reports`: report builders that can be used by CLIs and the private UI.
-- `tradingbot.apps`: stable application entrypoints for commands and services.
-- Root scripts such as `backtest.py`, `train.py`, and `run_live.py` remain user-facing compatibility commands.
+**Overlay**:
+Optional context that may constrain or tilt an **Ensemble Allocation**.
+_Avoid_: Fallback strategy
+
+**Execution Controls**:
+The safety and anti-churn rules that decide whether an allocation change may become orders.
+_Avoid_: Policy, model
+
+**Strategy NAV**:
+The BTC, ETH, and USDT value owned by this strategy, excluding unrelated assets such as OKB.
+_Avoid_: Account balance, realized PnL
+
+**Live Session**:
+One process lifetime of the live runner with numbered daily artifacts.
+_Avoid_: Backtest, deployment
+
+**Analyst Event**:
+A non-executable LLM observation, answer, validation, or visible failure.
+_Avoid_: Signal when no recommendation exists
+
+**Order Suggestion**:
+A bounded demo-order proposal that is inert until its requester confirms it.
+_Avoid_: Pending order, trade
+
+**Research Artifact**:
+An immutable experiment or session file kept for inspection and reproduction.
+_Avoid_: Database record, cache
+
+**Operational Database**:
+The local SQLite store for mutable application state and artifact query indexes.
+_Avoid_: Results archive, model registry
+
+## Relationships
+
+- An **RL Policy** contributes to exactly one **Ensemble Allocation** per decision cycle.
+- Zero or more **Overlays** may constrain an **Ensemble Allocation**.
+- **Execution Controls** may turn an allocation change into zero or more orders.
+- A **Live Session** produces many **Research Artifacts** and indexed decision records.
+- An **Analyst Event** may produce one **Order Suggestion**, but cannot submit it.
+- An **Order Suggestion** requires one explicit requester confirmation before demo submission.
+- The **Operational Database** indexes **Research Artifacts** without replacing them.
+
+## Runtime Modules
+
+- `tradingbot.storage` owns SQLite schema migrations and operational persistence.
+- `tradingbot.runtime` owns artifact/session mechanics, independent of strategy logic.
+- `tradingbot.reports` turns stored decisions into operator-facing summaries.
+- `tradingbot.apps` exposes stable lazy entrypoints.
+- Root commands remain compatibility entrypoints.
 
 ## Invariants
 
-- Reports go under `report/daily/YYYY-MM-DD/` or `report/important/`.
-- Preserved generated results go under `results/daily/YYYY-MM-DD/` or `results/important/`.
-- Secrets, `.env`, venvs, external clones, raw data, logs, and model checkpoints must not be committed.
-- Live and paper UI PnL should be labeled as unrealized unless a closed-position accounting report is explicitly added.
+- Reports belong under `report/daily/YYYY-MM-DD/` or `report/important/`.
+- Preserved results belong under `results/daily/YYYY-MM-DD/` or `results/important/`.
+- Research artifacts are append-only evidence; the operational database is mutable state.
+- Secrets, raw data, logs, model checkpoints, and local databases are never committed.
+- UI PnL is unrealized unless a closed-position accounting report explicitly says otherwise.
+- RL evidence with status `ABSTAIN` is no RL opinion for LLM agents.
 
+## Example Dialogue
+
+> **Developer:** "The **RL Policy** says 60% BTC. Should the analyst submit it?"
+> **Domain expert:** "No. It is only an **Ensemble Allocation**. **Execution Controls** decide whether orders are allowed, and an **Analyst Event** is never executable."
+
+## Flagged Ambiguities
+
+- "signal" previously meant both model output and LLM commentary; use **Ensemble Allocation** for RL output and **Analyst Event** for LLM output.
+- "results" previously included mutable application state; use **Research Artifact** for files and **Operational Database** for mutable state.

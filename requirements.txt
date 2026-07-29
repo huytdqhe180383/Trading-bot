@@ -1,43 +1,37 @@
-# ──────────────────────────────────────────────
-# BTC/ETH Auto-Trading System – Python 3.10+
-# ──────────────────────────────────────────────
+# Full research and application runtime (Python 3.12)
 
-# Deep Reinforcement Learning Framework
+# Reinforcement learning
 stable-baselines3>=2.7.1
-sb3-contrib>=2.7.1          # Extra algorithms (RecurrentPPO, TQC, etc.)
+sb3-contrib>=2.7.1
+gymnasium>=0.29.0
+
+# Data and numerics
+numpy>=1.26.0
+pandas>=2.1.0
+pandas-ta>=0.3.14b
+scipy>=1.11.0
+pyfolio-reloaded>=0.9.5
+empyrical>=0.5.5
+
+# Exchange and network integrations
+ccxt>=4.4.0
+requests>=2.31.0
+discord.py>=2.6.0
+
+# Private UI
 fastapi>=0.136.0
 uvicorn>=0.48.0
 websockets>=15.0.1
-
-# Data & Numerics
-numpy>=1.26.0
-pandas>=2.1.0
-pandas-ta>=0.3.14b          # Technical indicators (RSI, MACD, BBands, etc.)
-scipy>=1.11.0
-
-# Exchange Connectivity
-ccxt>=4.4.0                 # Canonical OKX-first unified exchange wrapper
-
-# Environment Validation
-gymnasium>=0.29.0            # FinRL-X uses Gymnasium (modern OpenAI Gym fork)
-
-# Backtesting metrics
-pyfolio-reloaded>=0.9.5     # Portfolio analytics & tear sheets
-empyrical>=0.5.5            # Sharpe, Sortino, Calmar, Max-DD calculations
-
-# Plotting & Reporting
-matplotlib>=3.8.0
-seaborn>=0.13.0
-
-# Utilities
-python-dotenv>=1.0.0        # Loads .env file for API keys
-requests>=2.31.0
-tqdm>=4.66.0
-loguru>=0.7.2               # Structured logging
 itsdangerous>=2.2.0
 python-multipart>=0.0.20
-discord.py>=2.6.0            # Analyst-only Discord bot interface
 
-# FinRL-X (clone from GitHub, then install locally)
+# Reporting and utilities
+matplotlib>=3.8.0
+seaborn>=0.13.0
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+loguru>=0.7.2
+
+# Optional FinRL-X source install:
 # git clone https://github.com/AI4Finance-Foundation/FinRL-Trading.git
-# pip install -e ./FinRL-Trading
+# python -m pip install -e ./FinRL-Trading

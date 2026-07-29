@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Test and code-quality tooling
+httpx>=0.28.0
+pytest>=9.0.0
+ruff>=0.16.0

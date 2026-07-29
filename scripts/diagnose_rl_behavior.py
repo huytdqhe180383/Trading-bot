@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tradingbot.reports.rl_behavior import write_behavior_diagnostics
+from tradingbot.reports.rl_behavior import write_behavior_diagnostics  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
