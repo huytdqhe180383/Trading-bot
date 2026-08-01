@@ -168,6 +168,28 @@ class UIServicesTest(unittest.TestCase):
             self.assertGreater(payload["freshness"]["age_seconds"], 0)
             self.assertFalse(payload["freshness"]["today_has_rows"])
 
+    def test_build_dashboard_payload_handles_missing_systemctl(self):
+        with TemporaryDirectory() as tmp:
+            results_dir = Path(tmp) / "results"
+            reports_dir = Path(tmp) / "report"
+            _write_live_decisions(results_dir)
+
+            def missing_status_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+                raise FileNotFoundError("systemctl not found")
+
+            payload = build_dashboard_payload(
+                tz_name="Asia/Bangkok",
+                results_dir=results_dir,
+                reports_dir=reports_dir,
+                status_runner=missing_status_runner,
+                now_utc=pd.Timestamp("2026-05-30T19:00:00+00:00"),
+            )
+
+            self.assertFalse(payload["status"]["available"])
+            self.assertEqual(payload["status"]["active_state"], "unavailable")
+            self.assertEqual(payload["status"]["sub_state"], "missing_systemctl")
+            self.assertIn("systemctl not found", payload["status"]["raw_stderr"])
+
     def test_build_history_payload_includes_freshness_summary(self):
         with TemporaryDirectory() as tmp:
             results_dir = Path(tmp)

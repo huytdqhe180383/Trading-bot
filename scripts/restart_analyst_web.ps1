@@ -190,4 +190,4 @@ if (-not $SkipFrontend) {
 
 Write-Host ""
 Write-Host "Open frontend: http://${FrontendHost}:$FrontendPort"
-Write-Host "Backend login: http://${BackendHost}:$BackendPort/login"
+Write-Host "Backend API: http://${BackendHost}:$BackendPort"

@@ -104,7 +104,16 @@ def run_control_command(
     exec_runner = runner or (
         lambda command: subprocess.run(command, capture_output=True, text=True, check=False, shell=False)
     )
-    result = exec_runner(cmd)
+    try:
+        result = exec_runner(cmd)
+    except FileNotFoundError as exc:
+        return {
+            "action": action,
+            "command": cmd,
+            "returncode": 127,
+            "stdout": "",
+            "stderr": str(exc),
+        }
     return {
         "action": action,
         "command": cmd,
@@ -122,14 +131,26 @@ def get_bot_service_status(
     runner = status_runner or (
         lambda command: subprocess.run(command, capture_output=True, text=True, check=False, shell=False)
     )
-    result = runner(
-        [
-            "systemctl",
-            "show",
-            service_name,
-            "--property=ActiveState,SubState,MainPID,ExecMainStartTimestamp",
-        ]
-    )
+    command = [
+        "systemctl",
+        "show",
+        service_name,
+        "--property=ActiveState,SubState,MainPID,ExecMainStartTimestamp",
+    ]
+    try:
+        result = runner(command)
+    except FileNotFoundError as exc:
+        return {
+            "service_name": service_name,
+            "available": False,
+            "active_state": "unavailable",
+            "sub_state": "missing_systemctl",
+            "main_pid": 0,
+            "started_at": "",
+            "uptime_seconds": None,
+            "raw_stdout": "",
+            "raw_stderr": str(exc),
+        }
     payload = {
         "service_name": service_name,
         "available": result.returncode == 0,

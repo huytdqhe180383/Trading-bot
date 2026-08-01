@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -25,20 +25,14 @@ from config import (
     REPORTS_DIR,
     RESULTS_DIR,
     UI_AUDIT_LOG_PATH,
-    UI_ADMIN_TAILSCALE_USERS,
-    UI_ALLOWED_TAILSCALE_USERS,
     UI_CONTROL_RATE_LIMIT,
     UI_CONTROL_USE_SUDO,
     UI_CORS_ALLOWED_ORIGINS,
     UI_ENABLE_CONTROLS,
-    UI_LOGIN_RATE_LIMIT,
-    UI_PASSWORD,
     UI_SESSION_MAX_AGE_SECS,
     UI_SESSION_SECRET,
     UI_TAIL_LINES_DEFAULT,
     UI_TARGET_SERVICE,
-    UI_TRUST_TAILSCALE_HEADERS,
-    UI_USERNAME,
 )
 from ui.services import (
     InMemoryRateLimiter,
@@ -58,30 +52,23 @@ from tradingbot.analyst.market import fetch_public_candles
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
+LOCAL_OPERATOR_USERNAME = "local-operator"
+LOCAL_OPERATOR_DISPLAY_NAME = "Local operator"
+LOCAL_OPERATOR_ROLE = "admin"
 
 
 @dataclass
 class UIAppContext:
-    username: str = UI_USERNAME
-    password: str = UI_PASSWORD
     session_secret: str = UI_SESSION_SECRET
     results_dir: Path = RESULTS_DIR
     reports_dir: Path = REPORTS_DIR
     logs_dir: Path = LOGS_DIR
     tz_name: str = LIVE_SESSION_TIMEZONE
     tail_lines_default: int = UI_TAIL_LINES_DEFAULT
-    login_rate_limit: int = UI_LOGIN_RATE_LIMIT
     control_rate_limit: int = UI_CONTROL_RATE_LIMIT
     controls_enabled: bool = UI_ENABLE_CONTROLS
     control_use_sudo: bool = UI_CONTROL_USE_SUDO
     session_max_age_secs: int = UI_SESSION_MAX_AGE_SECS
-    trust_tailscale_headers: bool = UI_TRUST_TAILSCALE_HEADERS
-    allowed_tailscale_users: frozenset[str] = field(
-        default_factory=lambda: frozenset(user.strip().lower() for user in UI_ALLOWED_TAILSCALE_USERS if user.strip())
-    )
-    admin_tailscale_users: frozenset[str] = field(
-        default_factory=lambda: frozenset(user.strip().lower() for user in UI_ADMIN_TAILSCALE_USERS if user.strip())
-    )
     audit_log_path: Path = UI_AUDIT_LOG_PATH
     target_service: str = UI_TARGET_SERVICE
     status_runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None
@@ -113,87 +100,27 @@ def _write_audit(ctx: UIAppContext, event: str, *, outcome: str, request: Reques
     append_ui_audit_log(event, outcome=outcome, details=payload, audit_log_path=ctx.audit_log_path)
 
 
-def _ensure_csrf(request: Request) -> str:
-    token = request.session.get("csrf_token")
-    if not token:
-        token = mint_csrf_token()
-        request.session["csrf_token"] = token
-    return token
-
-
-def _session_role(request: Request) -> str:
-    return str(request.session.get("role", "viewer"))
-
-
-def _set_authenticated_session(
-    request: Request,
-    *,
-    username: str,
-    role: str,
-    auth_method: str,
-    display_name: str | None = None,
-) -> None:
+def _ensure_local_session(request: Request) -> None:
+    if request.session.get("authenticated"):
+        if not request.session.get("csrf_token"):
+            request.session["csrf_token"] = mint_csrf_token()
+        return
     request.session.clear()
     request.session["authenticated"] = True
-    request.session["username"] = username
-    request.session["role"] = role
-    request.session["auth_method"] = auth_method
-    request.session["display_name"] = display_name or username
+    request.session["username"] = LOCAL_OPERATOR_USERNAME
+    request.session["role"] = LOCAL_OPERATOR_ROLE
+    request.session["auth_method"] = "local"
+    request.session["display_name"] = LOCAL_OPERATOR_DISPLAY_NAME
     request.session["csrf_token"] = mint_csrf_token()
 
 
-def _maybe_authenticate_via_tailscale(request: Request, ctx: UIAppContext) -> None:
-    if request.session.get("authenticated") or not ctx.trust_tailscale_headers:
-        return
-    login = request.headers.get("Tailscale-User-Login", "").strip().lower()
-    if not login:
-        return
-    if not ctx.allowed_tailscale_users:
-        _write_audit(ctx, "tailscale_auth", outcome="misconfigured", request=request, details={"username": login})
-        return
-    if ctx.allowed_tailscale_users and login not in ctx.allowed_tailscale_users:
-        _write_audit(ctx, "tailscale_auth", outcome="denied", request=request, details={"username": login})
-        raise HTTPException(status_code=403, detail="Tailscale user not authorized.")
-    role = "admin" if login in ctx.admin_tailscale_users else "viewer"
-    display_name = request.headers.get("Tailscale-User-Name", "").strip() or login
-    _set_authenticated_session(request, username=login, role=role, auth_method="tailscale", display_name=display_name)
-    _write_audit(ctx, "tailscale_auth", outcome="success", request=request, details={"username": login, "role": role})
-
-
-def _require_page_auth(request: Request, ctx: UIAppContext) -> Response | None:
-    try:
-        _maybe_authenticate_via_tailscale(request, ctx)
-    except HTTPException as exc:
-        return HTMLResponse(str(exc.detail), status_code=exc.status_code)
-    if request.session.get("authenticated"):
-        return None
-    _write_audit(ctx, "page_access", outcome="denied", request=request, details={"path": str(request.url.path)})
-    return RedirectResponse(url="/login", status_code=303)
-
-
-def _require_api_auth(request: Request, ctx: UIAppContext) -> None:
-    _maybe_authenticate_via_tailscale(request, ctx)
-    if request.session.get("authenticated"):
-        return
-    _write_audit(ctx, "api_access", outcome="denied", request=request, details={"path": str(request.url.path)})
-    raise HTTPException(status_code=401, detail="Authentication required.")
-
-
-def _require_admin(request: Request, ctx: UIAppContext) -> None:
-    _require_api_auth(request, ctx)
-    if _session_role(request) == "admin":
-        return
-    _write_audit(
-        ctx,
-        "admin_access",
-        outcome="denied",
-        request=request,
-        details={"path": str(request.url.path), "username": request.session.get("username", "")},
-    )
-    raise HTTPException(status_code=403, detail="Admin access required.")
+def _ensure_csrf(request: Request) -> str:
+    _ensure_local_session(request)
+    return str(request.session["csrf_token"])
 
 
 async def _validate_csrf(request: Request) -> None:
+    _ensure_local_session(request)
     expected = request.session.get("csrf_token")
     if not expected:
         raise HTTPException(status_code=403, detail="Missing CSRF token.")
@@ -206,14 +133,15 @@ async def _validate_csrf(request: Request) -> None:
 
 
 def _base_template_context(request: Request, ctx: UIAppContext) -> dict[str, Any]:
+    _ensure_local_session(request)
     return {
         "request": request,
         "csrf_token": _ensure_csrf(request),
         "controls_enabled": ctx.controls_enabled,
         "strategy_nav_note": STRATEGY_NAV_NOTE,
         "session_user": request.session.get("display_name") or request.session.get("username", ""),
-        "session_role": _session_role(request),
-        "is_admin": _session_role(request) == "admin",
+        "session_role": str(request.session.get("role", LOCAL_OPERATOR_ROLE)),
+        "is_admin": True,
     }
 
 
@@ -254,68 +182,8 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/login", response_class=HTMLResponse)
-    async def login_page(request: Request) -> HTMLResponse:
-        _maybe_authenticate_via_tailscale(request, context)
-        if request.session.get("authenticated"):
-            return RedirectResponse(url="/", status_code=303)
-        template_ctx = _base_template_context(request, context)
-        template_ctx.update({"error": ""})
-        return _render_template(request, "login.html", template_ctx)
-
-    @app.post("/login", response_class=HTMLResponse)
-    async def login(
-        request: Request,
-        username: str = Form(""),
-        password: str = Form(""),
-    ) -> Response:
-        if not context.rate_limiter.allow(f"login:{_client_identity(request)}", context.login_rate_limit):
-            _write_audit(context, "login", outcome="rate_limited", request=request)
-            return _render_template(
-                request,
-                "login.html",
-                {**_base_template_context(request, context), "error": "Too many login attempts."},
-                status_code=429,
-            )
-        try:
-            await _validate_csrf(request)
-        except HTTPException:
-            _write_audit(context, "login", outcome="csrf_failed", request=request)
-            raise
-        if not context.username or not context.password:
-            _write_audit(context, "login", outcome="misconfigured", request=request)
-            return _render_template(
-                request,
-                "login.html",
-                {**_base_template_context(request, context), "error": "UI credentials are not configured."},
-                status_code=503,
-            )
-        valid = secrets.compare_digest(username, context.username) and secrets.compare_digest(password, context.password)
-        if not valid:
-            _write_audit(context, "login", outcome="failed", request=request, details={"username": username})
-            return _render_template(
-                request,
-                "login.html",
-                {**_base_template_context(request, context), "error": "Invalid credentials."},
-                status_code=401,
-            )
-        _set_authenticated_session(request, username=context.username, role="admin", auth_method="password")
-        _write_audit(context, "login", outcome="success", request=request, details={"username": username})
-        return RedirectResponse(url="/", status_code=303)
-
-    @app.post("/logout")
-    async def logout(request: Request) -> Response:
-        _require_api_auth(request, context)
-        await _validate_csrf(request)
-        _write_audit(context, "logout", outcome="success", request=request)
-        request.session.clear()
-        return RedirectResponse(url="/login", status_code=303)
-
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request) -> Response:
-        auth_redirect = _require_page_auth(request, context)
-        if auth_redirect:
-            return auth_redirect
         payload = build_dashboard_payload(
             tz_name=context.tz_name,
             results_dir=context.results_dir,
@@ -334,9 +202,6 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
         date: str | None = None,
         hours: float | None = None,
     ) -> Response:
-        auth_redirect = _require_page_auth(request, context)
-        if auth_redirect:
-            return auth_redirect
         payload = build_report_payload(
             mode=mode,
             tz_name=context.tz_name,
@@ -352,9 +217,6 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.get("/history", response_class=HTMLResponse)
     async def history_page(request: Request) -> Response:
-        auth_redirect = _require_page_auth(request, context)
-        if auth_redirect:
-            return auth_redirect
         payload = build_history_payload(tz_name=context.tz_name, results_dir=context.results_dir)
         template_ctx = _base_template_context(request, context)
         template_ctx.update(payload)
@@ -362,9 +224,6 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.get("/logs", response_class=HTMLResponse)
     async def logs_page(request: Request, source: str = "stderr", lines: int | None = None) -> Response:
-        auth_redirect = _require_page_auth(request, context)
-        if auth_redirect:
-            return auth_redirect
         try:
             log_payload = read_log_source(
                 source,
@@ -381,9 +240,6 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.get("/reports/file/{report_date}/{filename}")
     async def report_file(request: Request, report_date: str, filename: str) -> Response:
-        auth_redirect = _require_page_auth(request, context)
-        if auth_redirect:
-            return auth_redirect
         try:
             path = safe_compact_report_path(report_date, filename, reports_dir=context.reports_dir)
         except ValueError as exc:
@@ -394,7 +250,7 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.get("/api/status")
     async def api_status(request: Request) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         return JSONResponse(
             build_dashboard_payload(
                 tz_name=context.tz_name,
@@ -412,7 +268,7 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
         date: str | None = None,
         hours: float | None = None,
     ) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         return JSONResponse(
             build_report_payload(
                 mode=mode,
@@ -426,12 +282,12 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.get("/api/history")
     async def api_history(request: Request) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         return JSONResponse(build_history_payload(tz_name=context.tz_name, results_dir=context.results_dir))
 
     @app.get("/api/logs")
     async def api_logs(request: Request, source: str = "stderr", lines: int | None = None) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         try:
             payload = read_log_source(
                 source,
@@ -446,12 +302,12 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.get("/api/analyst/status")
     async def api_analyst_status(request: Request) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         return JSONResponse(context.analyst_service.status().to_dict())
 
     @app.post("/api/analyst/run")
     async def api_analyst_run(request: Request, payload: AnalystRunRequest) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         if payload.explain_alert_id:
             event = context.analyst_service.explain(alert_id=payload.explain_alert_id)
         elif payload.latest_news:
@@ -478,17 +334,17 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.get("/api/analyst/events")
     async def api_analyst_events(request: Request, limit: int | None = None) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         return JSONResponse({"events": context.analyst_service.events(limit=limit)})
 
     @app.get("/api/analyst/signals")
     async def api_analyst_signals(request: Request, limit: int | None = None) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         return JSONResponse({"signals": context.analyst_service.signals(limit=limit)})
 
     @app.get("/api/analyst/budget")
     async def api_analyst_budget(request: Request) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         return JSONResponse(context.analyst_service.budget.snapshot())
 
     @app.get("/api/market/candles")
@@ -498,7 +354,7 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
         interval: str = "1h",
         limit: int = 500,
     ) -> JSONResponse:
-        _require_api_auth(request, context)
+        _ensure_local_session(request)
         try:
             candles = fetch_public_candles(symbol=symbol, interval=interval, limit=limit)
         except ValueError as exc:
@@ -516,9 +372,6 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.websocket("/ws/analyst")
     async def ws_analyst(websocket: WebSocket) -> None:
-        if not websocket.session.get("authenticated"):
-            await websocket.close(code=1008)
-            return
         await websocket.accept()
         try:
             await websocket.send_json({"type": "analyst_events", "events": context.analyst_service.events()})
@@ -532,7 +385,7 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
     @app.post("/api/control/{action}")
     async def api_control(action: str, request: Request) -> JSONResponse:
-        _require_admin(request, context)
+        _ensure_local_session(request)
         await _validate_csrf(request)
         if not context.controls_enabled:
             _write_audit(context, "control", outcome="disabled", request=request, details={"action": action})

@@ -14,30 +14,22 @@
     <div class="brand">
       <img src="{{ url_for('static', path='icon.svg') }}" alt="" class="brand-icon">
       <div>
-        <div class="eyebrow">Private Tailnet UI</div>
+        <div class="eyebrow">Local operator UI</div>
         <h1>Trading Bot Console</h1>
       </div>
     </div>
-    {% if request.session.get('authenticated') %}
     <div class="session-meta">
       <span class="session-badge">{{ session_user }}</span>
       <span class="session-badge">{{ session_role }}</span>
     </div>
-    <form method="post" action="/logout" class="logout-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="ghost-button">Log out</button>
-    </form>
-    {% endif %}
   </header>
 
-  {% if request.session.get('authenticated') %}
   <nav class="nav">
     <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
     <a href="/reports" class="{% if request.url.path.startswith('/reports') %}active{% endif %}">Reports</a>
     <a href="/history" class="{% if request.url.path.startswith('/history') %}active{% endif %}">History</a>
     <a href="/logs" class="{% if request.url.path.startswith('/logs') %}active{% endif %}">Logs</a>
   </nav>
-  {% endif %}
 
   <main class="page">
     {% block content %}{% endblock %}
