@@ -9,7 +9,7 @@ execution path can submit an OKX demo order.
 
 ```mermaid
 flowchart LR
-  data["Market, news, and account facts"] --> evidence["RL evidence + Kronos forecast"]
+  data["Market and account facts"] --> evidence["RL evidence + Kronos forecast"]
   evidence --> research["Analyst roles"]
   data --> research
   research --> plan["Execution planner"]
@@ -20,7 +20,8 @@ flowchart LR
 
 `Kronos`, the PPO/SAC ensemble, MetaFusion, and the OKX gateway are software
 components, not conversational agents. They must not be given a system prompt
-or be controlled by one.
+or be controlled by one. The live system prompts are versioned in
+`tradingbot/prompts/agent_roles.py` and `tradingbot/prompts/execution.py`.
 
 ## Prompt Rules For Every LLM Role
 
@@ -38,8 +39,8 @@ or be controlled by one.
 
 ### Main analyst
 
-**Purpose:** Turn the supplied market snapshot, public-news snapshot, and safe
-RL evidence into one concise human-facing market view.
+**Purpose:** Turn the supplied market snapshot, technical view, and safe RL
+evidence into one concise human-facing market view.
 
 **Should do:** State the prevailing directional view, competing evidence,
 material risks, and concrete invalidation conditions. Answer operator questions
@@ -48,11 +49,11 @@ in plain language and distinguish `BUY`, `SELL`, `REDUCE`, `HOLD`, and `AVOID`.
 **Must not do:** Invent data, cite unavailable sources, set allocations, sizes,
 leverage, entry prices, or exchange commands.
 
-**Required output:** recommendation, evidence ledger, confidence *label* (not a
-probability), rationale, risk notes, invalidation conditions, data freshness,
-and abstention reason when applicable.
+**Required output:** the validated analyst schema: recommendation, confidence
+score or `null`, rationale, risk notes, and invalidation. The compact text
+fields carry the evidence ledger, freshness, and abstention context.
 
-**Current prompt:** `tradingbot/analyst/service.py`, main-role message builder.
+**Current prompt:** `tradingbot/prompts/agent_roles.py`, `main_analyst`.
 
 ### Technical analyst
 
@@ -66,29 +67,18 @@ and the price behavior that invalidates the thesis.
 **Must not do:** Treat an indicator as proof, invent indicator readings,
 incorporate unsupplied news, or output a trade size/order.
 
-**Required output:** timeframe-by-timeframe factual observations, directional
-bias, confidence label, counter-thesis, invalidation, and data gaps.
+**Required output:** the validated analyst schema. `recommendation` is the
+non-executable `AVOID` sentinel; the rationale carries the technical bias,
+counter-thesis, and data gaps.
 
-**Current prompt:** `tradingbot/analyst/service.py`, auxiliary-role builder as
-`technical_analyst`.
+**Current prompt:** `tradingbot/prompts/agent_roles.py`, `technical_analyst`.
 
-### News analyst
+### Public-news utility (not an LLM role)
 
-**Purpose:** Convert supplied, timestamped public-news items into an asset and
-market-risk assessment.
-
-**Should do:** Attribute each claim to a supplied headline/source, assess the
-likely transmission channel and horizon, flag contradictory reports, and say
-when news is insufficient.
-
-**Must not do:** Predict facts not in the supplied sources, manufacture macro
-events, use stale news as current, or create a price target/order.
-
-**Required output:** source-attributed fact list, sentiment/risk classification,
-relevance horizon, uncertainty, and invalidation or expiry condition.
-
-**Current prompt:** `tradingbot/analyst/service.py`, auxiliary-role builder as
-`news_analyst`.
+`latest_news` remains an operator-facing status utility, but no news snapshot
+is passed to an LLM role. A news analyst is intentionally deferred until a
+source with adequate attribution, timestamps, coverage, and reliability checks
+is available.
 
 ### Risk validator
 
@@ -102,12 +92,11 @@ reduce conviction or abstain.
 **Must not do:** Reword the original alert uncritically, approve an order,
 change portfolio weights, or override deterministic risk controls.
 
-**Required output:** validation status, strongest supporting and opposing
-evidence, risk notes, revised directional recommendation, invalidation, and
-abstention reason.
+**Required output:** the validated analyst schema. The rationale starts with a
+validation status and includes the strongest supporting/opposing evidence;
+`risk_notes` and `invalidation` carry the remaining challenge criteria.
 
-**Current prompt:** `tradingbot/analyst/service.py`, `risk_validator` message
-builder.
+**Current prompt:** `tradingbot/prompts/agent_roles.py`, `risk_validator`.
 
 ### Execution planner
 
@@ -126,8 +115,8 @@ limits.
 required limit/slippage fields, rationale, and the facts that require a fresh
 check before confirmation.
 
-**Current prompt:** `tradingbot/execution/service.py`, execution-planner
-message builder. Server-side validation is the authority, not the prompt.
+**Current prompt:** `tradingbot/prompts/execution.py`. Server-side validation is
+the authority, not the prompt.
 
 ### Portfolio risk gate
 
@@ -140,11 +129,11 @@ de-risked, or blocked using the supplied drawdown and volatility context.
 **Must not do:** Generate alpha, recommend a ticker, select a position size, or
 relax hard portfolio constraints.
 
-**Required output:** risk flag, evidence-based rationale, uncertainty, and
-input freshness. A missing/unavailable result must leave deterministic policy
-in control.
+**Required output:** risk flag, uncalibrated confidence score, and concise
+evidence-based rationale including uncertainty. A missing/unavailable result
+must leave deterministic policy in control.
 
-**Current prompt:** `adapters/llm_risk_gate_adapter.py`.
+**Current prompt:** `tradingbot/prompts/agent_roles.py`, portfolio risk gate.
 
 ## External And Non-LLM Contributors
 
@@ -156,9 +145,10 @@ research packet: retain source data, role opinions, disagreement, and raw
 decision provenance. Do not convert its text directly into MetaFusion weights
 or executable orders.
 
-When authoring prompts for its roles, use the same briefs above: technical,
-news/sentiment, sceptical risk review, and final research synthesis. Add a
-separate bull case and bear case so agreement is earned rather than assumed.
+When authoring prompts for its roles, use the active technical, sceptical risk
+review, and final research-synthesis briefs above. Keep news/sentiment disabled
+until the source-quality requirements stated above are met. Add a separate bull
+case and bear case so agreement is earned rather than assumed.
 
 **Integration location:** `adapters/tradingagents_adapter.py`. Its upstream
 prompts are version-dependent and are not vendored in this repository.

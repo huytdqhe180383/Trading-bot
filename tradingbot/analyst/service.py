@@ -27,6 +27,7 @@ from config import (
     RESULTS_DIR,
     SYMBOLS,
 )
+from tradingbot.prompts import ANALYST_PROMPT_VERSION, analyst_system_prompt
 
 from .budget import LLMBudget, LLMBudgetExhausted
 from .llm import LLMInvalidResponseError, LLMProviderError, OpenAICompatibleLLMClient
@@ -88,7 +89,9 @@ class AnalystService:
         The execution planner owns the executable schema and confirmation gate;
         these roles remain directional/contextual and cannot emit an order.
         """
-        return self._build_auxiliary_views(dict(prompt_payload))
+        return self._build_auxiliary_views(
+            {key: value for key, value in prompt_payload.items() if key != "news_snapshot"}
+        )
 
     def run_update(
         self,
@@ -98,11 +101,9 @@ class AnalystService:
         scope: str = "interactive",
     ) -> AnalystEvent:
         normalized_symbol = _normalize_symbol(symbol)
-        news_snapshot = build_news_snapshot(symbol=normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
             "market_snapshot": market_snapshot or {"status": "snapshot_unavailable"},
-            "news_snapshot": news_snapshot,
             "task": (
                 "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
                 "Use only BUY, SELL, REDUCE, HOLD, or AVOID. Do not include quantities, leverage, "
@@ -125,18 +126,16 @@ class AnalystService:
         scope: str = "interactive",
     ) -> AnalystEvent:
         normalized_symbol = _normalize_symbol(symbol)
-        news_snapshot = build_news_snapshot(symbol=normalized_symbol)
         market_snapshot = _safe_public_snapshot(normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
             "question": str(question or "").strip(),
             "market_snapshot": market_snapshot,
-            "news_snapshot": news_snapshot,
             "task": (
                 "Answer as an analyst. Return strict JSON with recommendation, confidence, rationale, "
                 "risk_notes, invalidation. If the user explicitly asks for position advice, give a "
                 "directional advisory view using BUY, SELL, REDUCE, HOLD, or AVOID based on the supplied "
-                "public market snapshot and news. Do not default to HOLD merely because the answer is "
+                "public market snapshot and any auxiliary views. Do not default to HOLD merely because the answer is "
                 "advisory; use HOLD only when the evidence is genuinely balanced or insufficient. If the "
                 "question is not about market direction, recommendation may be HOLD while the rationale "
                 "answers the question. Do not include quantities, leverage, orders, exchange commands, "
@@ -162,12 +161,10 @@ class AnalystService:
         related = next((event for event in self.events() if event.get("id") == alert_id), None)
         if related and normalized_symbol == "ALL":
             normalized_symbol = _normalize_symbol(str(related.get("symbol", "ALL")))
-        news_snapshot = build_news_snapshot(symbol=normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
             "alert_id": alert_id,
             "related_alert": related or {},
-            "news_snapshot": news_snapshot,
             "task": (
                 "Act as risk validator. Return strict JSON with recommendation, confidence, rationale, "
                 "risk_notes, invalidation. Do not include quantities, leverage, orders, exchange commands, "
@@ -198,7 +195,6 @@ class AnalystService:
             "symbol": _normalize_symbol(str(related.get("symbol", "ALL"))),
             "alert_id": alert_id,
             "related_alert": related,
-            "news_snapshot": build_news_snapshot(symbol=_normalize_symbol(str(related.get("symbol", "ALL")))),
             "task": (
                 "Explain this existing alert in fresh, plainer language for a human analyst. "
                 "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
@@ -255,7 +251,7 @@ class AnalystService:
         normalized_scope = _normalize_llm_scope(scope)
         llm_client = self._llm_client_for_scope(normalized_scope)
         prompt_payload = {
-            **prompt_payload,
+            **{key: value for key, value in prompt_payload.items() if key != "news_snapshot"},
             "scope": normalized_scope,
             "llm_model": getattr(llm_client, "model", ""),
             "rl_evidence": prompt_payload.get("rl_evidence", self._safe_rl_evidence()),
@@ -268,16 +264,7 @@ class AnalystService:
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "You are a senior discretionary crypto market analyst. "
-                            "You are not an autonomous trading system. "
-                            "Synthesize price action, levels, volume, news, uncertainty, and auxiliary analyst views. "
-                            "RL evidence, when supplied, is non-executable context only. "
-                            "Treat RL evidence status ABSTAIN as no RL opinion, name uncertainty when relevant, "
-                            "and never infer quantities, leverage, orders, or target allocations from RL evidence. "
-                            "Be decisive when evidence is directional and humble when it is mixed. "
-                            "Output only strict JSON with natural, human-readable rationale."
-                        ),
+                        "content": analyst_system_prompt(role),
                     },
                     {"role": "user", "content": _json_prompt(prompt_payload)},
                 ],
@@ -331,11 +318,11 @@ class AnalystService:
                 "scope": normalized_scope,
                 "alert_id": prompt_payload.get("alert_id", ""),
                 "market_snapshot": prompt_payload.get("market_snapshot", {}),
-                "news_snapshot": prompt_payload.get("news_snapshot", {}),
                 "rl_evidence": prompt_payload.get("rl_evidence", {}),
                 "auxiliary_views": prompt_payload.get("auxiliary_views", []),
                 "llm_scope": normalized_scope,
                 "llm_model": getattr(llm_client, "model", ""),
+                "prompt_version": ANALYST_PROMPT_VERSION,
             },
         )
         return self.store.append(event)
@@ -345,15 +332,8 @@ class AnalystService:
         for role, task in (
             (
                 "technical_analyst",
-                "Focus only on public market structure, trend, momentum, support/resistance, volatility, and volume. "
-                "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
-                "No quantities, leverage, orders, exchange commands, or target allocations.",
-            ),
-            (
-                "news_analyst",
-                "Focus only on the supplied public news snapshot and event risk. "
-                "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
-                "No quantities, leverage, orders, exchange commands, or target allocations.",
+                "Assess only supplied OHLCV-derived market facts and identify technical bias, "
+                "counter-evidence, invalidation, and data gaps without proposing an order.",
             ),
         ):
             try:
@@ -362,10 +342,7 @@ class AnalystService:
                     messages=[
                         {
                             "role": "system",
-                            "content": (
-                                f"You are the {role.replace('_', ' ')} in an analyst-only crypto research team. "
-                                "You are advisory only. Output only strict JSON."
-                            ),
+                            "content": analyst_system_prompt(role),
                         },
                         {"role": "user", "content": _json_prompt({**prompt_payload, "task": task, "auxiliary_role": role})},
                     ],
@@ -381,6 +358,7 @@ class AnalystService:
                         "risk_notes": parsed["risk_notes"],
                         "invalidation": parsed["invalidation"],
                         "llm_model": getattr(self.background_llm_client, "model", ""),
+                        "prompt_version": ANALYST_PROMPT_VERSION,
                     }
                 )
             except (LLMBudgetExhausted, LLMProviderError, LLMInvalidResponseError, AnalystValidationError) as exc:

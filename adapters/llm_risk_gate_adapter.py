@@ -17,6 +17,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import requests
+from tradingbot.prompts import portfolio_risk_gate_system_prompt
 try:
     from loguru import logger
 except Exception:  # pragma: no cover - fallback when loguru is unavailable
@@ -221,10 +222,7 @@ class LLMRiskGateAdapter:
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You are a portfolio risk gate. "
-                        "Output only JSON with keys risk_flag, confidence, rationale."
-                    ),
+                    "content": portfolio_risk_gate_system_prompt(),
                 },
                 {"role": "user", "content": prompt},
             ],

@@ -56,7 +56,8 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertEqual(event.status, "ok")
             self.assertEqual(event.recommendation, "HOLD")
             self.assertNotIn("orders", event.to_public_dict())
-            self.assertIn("news_snapshot", event.payload)
+            self.assertNotIn("news_snapshot", event.payload)
+            self.assertEqual(event.payload["prompt_version"], "crypto_research_v1")
             self.assertEqual(event.payload["rl_evidence"]["status"], "ABSTAIN")
             events = service.events()
             self.assertEqual(len(events), 1)
@@ -161,11 +162,11 @@ class AnalystServiceTest(unittest.TestCase):
             background_event = service.run_update(symbol="BTCUSDT", scope="background")
             chat_event = service.ask(question="Deep read?", symbol="BTCUSDT", scope="interactive")
 
-            self.assertEqual(background_llm.calls, 3)
+            self.assertEqual(background_llm.calls, 2)
             self.assertEqual(interactive_llm.calls, 1)
             self.assertEqual(background_event.payload["llm_model"], "cheap-model")
             self.assertEqual(chat_event.payload["llm_model"], "strong-model")
-            self.assertEqual([view["role"] for view in chat_event.payload["auxiliary_views"]], ["technical_analyst", "news_analyst"])
+            self.assertEqual([view["role"] for view in chat_event.payload["auxiliary_views"]], ["technical_analyst"])
 
     def test_ask_prompt_includes_public_market_snapshot_for_position_advice(self):
         with TemporaryDirectory() as tmp_name:
@@ -180,7 +181,8 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertIn("market_snapshot", prompt)
             self.assertIn("auxiliary_views", prompt)
             self.assertIn("rl_evidence", prompt)
-            self.assertIn("Treat RL evidence status ABSTAIN as no RL opinion", llm.last_kwargs["messages"][0]["content"])
+            self.assertNotIn("news_snapshot", prompt)
+            self.assertIn("ABSTAIN is no RL opinion", llm.last_kwargs["messages"][0]["content"])
             self.assertIn("Do not default to HOLD merely because the answer is advisory", prompt)
 
     def test_rl_evidence_provider_error_fails_closed(self):
@@ -224,7 +226,7 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertEqual(event.status, "ok")
             self.assertEqual(event.recommendation, "HOLD")
             self.assertEqual(interactive_llm.calls, 1)
-            self.assertEqual(background_llm.calls, 2)
+            self.assertEqual(background_llm.calls, 1)
             self.assertEqual(event.payload["auxiliary_views"][0]["status"], "unavailable")
             self.assertIn("weak model down", interactive_llm.last_kwargs["messages"][1]["content"])
 

@@ -19,7 +19,7 @@ from config import (
 from tradingbot.analyst.budget import LLMBudgetExhausted
 from tradingbot.analyst.llm import LLMInvalidResponseError, LLMProviderError
 from tradingbot.analyst.models import AnalystEvent, AnalystValidationError
-from tradingbot.analyst.news import build_news_snapshot
+from tradingbot.prompts import EXECUTION_PROMPT_VERSION, execution_planner_system_prompt
 from tradingbot.analyst.service import AnalystService
 from tradingbot.analyst.store import AnalystEventStore
 
@@ -89,20 +89,17 @@ class TradingExecutionService:
         try:
             account = self.okx.fetch_account_context(inst_id=normalized)
             market = self.okx.fetch_market_context(normalized)
-            news = build_news_snapshot(symbol=normalized.replace("-", ""))
             prompt_payload = {
                 "symbol": normalized.replace("-", ""),
                 "instrument": market.get("instrument", {}),
                 "market_context": market,
                 "account_context": account,
-                "news_snapshot": news,
                 "instruction": instruction,
                 "auxiliary_views": self.analyst_service.build_multi_agent_views(
                     {
                         "symbol": normalized.replace("-", ""),
                         "market_snapshot": market,
                         "account_context": account,
-                        "news_snapshot": news,
                         "task": (
                             "Provide a directional risk view for an execution planner. "
                             "Do not propose an order, quantity, leverage, or exchange command."
@@ -119,18 +116,7 @@ class TradingExecutionService:
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "You are the execution-planning agent in a multi-agent crypto system. "
-                            "The account context is private and may be stale. This response is only a "
-                            "suggestion; never claim that an order was submitted. Return only strict JSON. "
-                            "Use spot BTC-USDT or ETH-USDT. Choose NO_TRADE when the evidence or account "
-                            "state is insufficient. For PLACE, use side BUY/SELL, order_type MARKET/LIMIT, "
-                            "size, size_unit base/quote, optional price, slippage_pct as a decimal fraction, "
-                            "rationale, risk_notes, and confidence. Market BUY uses quote-sized USDT and "
-                            "market SELL uses base-sized asset units. Limit orders use base size. "
-                            "Never include leverage, withdrawal, credentials, or an exchange command. "
-                            "A market order must explicitly include slippage_pct within the supplied maximum."
-                        ),
+                        "content": execution_planner_system_prompt(),
                     },
                     {"role": "user", "content": json.dumps(prompt_payload, ensure_ascii=True, sort_keys=True)},
                 ]
@@ -147,7 +133,11 @@ class TradingExecutionService:
                     confidence=plan.get("confidence"),
                     rationale=plan["rationale"],
                     risk_notes=plan["risk_notes"],
-                    payload={"account_context_received": True, "auxiliary_views": prompt_payload["auxiliary_views"]},
+                    payload={
+                        "account_context_received": True,
+                        "auxiliary_views": prompt_payload["auxiliary_views"],
+                        "prompt_version": EXECUTION_PROMPT_VERSION,
+                    },
                 )
             order = self.okx.normalize_order(
                 {**plan, "inst_id": normalized},
@@ -193,6 +183,7 @@ class TradingExecutionService:
                     "open_orders_seen": record["open_orders_seen"],
                     "positions_seen": record["positions_seen"],
                     "llm_model": getattr(self.analyst_service.interactive_llm_client, "model", ""),
+                    "prompt_version": EXECUTION_PROMPT_VERSION,
                 },
             )
         except (OKXClientError, OrderSuggestionValidationError, AnalystValidationError, ValueError) as exc:

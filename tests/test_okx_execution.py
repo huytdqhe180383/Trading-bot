@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from tradingbot.analyst.budget import LLMBudget
 from tradingbot.analyst.store import AnalystEventStore
@@ -146,9 +146,7 @@ class OrderPlanValidationTest(unittest.TestCase):
 
 class TradingExecutionServiceTest(unittest.TestCase):
     def test_confirm_rechecks_context_then_submits_only_once(self):
-        with TemporaryDirectory() as tmp_name, patch(
-            "tradingbot.execution.service.build_news_snapshot", return_value={"status": "ok", "items": []}
-        ):
+        with TemporaryDirectory() as tmp_name:
             base = Path(tmp_name)
             event_store = AnalystEventStore(results_dir=base / "results", reports_dir=base / "report")
             llm = Mock()
