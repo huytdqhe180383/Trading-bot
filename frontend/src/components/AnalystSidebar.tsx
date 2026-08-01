@@ -1,19 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Bot, CheckCircle2, LogIn, Newspaper, Send, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Newspaper, Send } from "lucide-react";
 import {
-  API_URL,
   WS_URL,
   askAnalyst,
-  explainAnalystEvent,
   fetchAnalystBudget,
   fetchAnalystEvents,
   fetchLatestNews,
-  validateAnalystEvent,
 } from "@/lib/api";
 import { parseSupportResistanceInterval, wantsSupportResistance } from "@/lib/chartAnalysis";
-import type { AnalystBudget, AnalystEvent } from "@/lib/types";
+import type { AnalystBudget, AnalystEvent, AnalystScenario, HorizonOutlook } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
 
 type AnalystSidebarProps = {
@@ -37,23 +34,20 @@ type ChatItem =
 export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSidebarProps) {
   const [question, setQuestion] = useState("");
   const [budget, setBudget] = useState<AnalystBudget | null>(null);
-  const [authNeeded, setAuthNeeded] = useState(false);
   const [userMessages, setUserMessages] = useState<UserChatMessage[]>([]);
   const [newsEvent, setNewsEvent] = useState<AnalystEvent | null>(null);
   const [newsOpen, setNewsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const { symbol, events, selectedEventId, upsertEvent, setSelectedEventId, requestSupportResistance } = useTradingStore();
+  const { symbol, events, upsertEvent, setSelectedEventId, requestSupportResistance } = useTradingStore();
 
   useEffect(() => {
     Promise.all([fetchAnalystEvents(), fetchAnalystBudget()])
       .then(([initialEvents, budgetSnapshot]) => {
         initialEvents.forEach((event) => upsertEvent(event));
         setBudget(budgetSnapshot);
-        setAuthNeeded(false);
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : "Analyst API unavailable.";
-        setAuthNeeded(message.toLowerCase().includes("authentication"));
         setError(message);
       });
   }, [setError, upsertEvent]);
@@ -73,9 +67,6 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
         // Keep the UI deterministic; malformed websocket messages are ignored.
       }
     };
-    ws.onclose = (event) => {
-      if (event.code === 1008) setAuthNeeded(true);
-    };
     return () => ws.close();
   }, [upsertEvent]);
 
@@ -85,14 +76,14 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
     }
   }, [events.length, userMessages.length]);
 
-  const chatEvents = events.filter((event) => event.event_type !== "news");
+  const screeningEvents = events.filter((event) => event.event_type === "screening" && event.symbol === symbol);
+  const latestScreening = screeningEvents.at(-1);
+  const chatEvents = events.filter((event) => !["news", "news_analysis", "screening"].includes(event.event_type));
   const chatItems: ChatItem[] = [
     ...chatEvents.map((event) => ({ kind: "event" as const, event, created_at_utc: event.created_at_utc })),
     ...userMessages,
   ].sort((left, right) => new Date(left.created_at_utc).getTime() - new Date(right.created_at_utc).getTime());
-  const selectedEvent = chatEvents.find((event) => event.id === selectedEventId) || chatEvents.at(-1);
-
-  const runAction = async (action: "ask" | "validate" | "explain" | "news") => {
+  const runAction = async (action: "ask" | "news") => {
     setBusy(true);
     setError("");
     try {
@@ -114,10 +105,6 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
         ]);
         event = await askAnalyst(symbol, asked);
         setQuestion("");
-      } else if (action === "validate") {
-        event = await validateAnalystEvent(symbol, selectedEvent?.id || "");
-      } else if (action === "explain") {
-        event = await explainAnalystEvent(selectedEvent?.id || "");
       } else {
         event = await fetchLatestNews(symbol);
         setNewsEvent(event);
@@ -131,7 +118,6 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
       if (nextBudget) setBudget(nextBudget);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Analyst request failed.";
-      setAuthNeeded(message.toLowerCase().includes("authentication"));
       setError(message);
     } finally {
       setBusy(false);
@@ -149,19 +135,17 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
       <div className="sidebar-header">
         <h2>Analyst chat</h2>
         <p>
-          Main Analyst for chat/deep analysis, Risk Validator for checks. Advisory output is allowed; order sizing,
-          leverage, exchange commands, and autonomous execution stay forbidden.
+          Strong manual analysis covers intraday and swing horizons, momentum, two-way scenarios, and conditional
+          planning levels. It remains advisory and cannot execute an order.
+        </p>
+        <p className="scanner-heartbeat">
+          Weak 15s screen: {latestScreening ? `${latestScreening.recommendation || "checked"} · ${formatTime(latestScreening.created_at_utc)}` : "starting…"}
         </p>
         {budget && (
           <p>
-            Interactive budget: {budget.interactive_used}/{budget.interactive_limit} · Background: {budget.background_used}/
-            {budget.background_limit}
+            Manual: {budget.interactive_used}/{budget.interactive_limit} · Screening: {budget.screening_used ?? budget.background_used}/
+            {budget.screening_limit ?? budget.background_limit} · Scheduled: {budget.scheduled_used ?? 0}/{budget.scheduled_limit ?? 0}
           </p>
-        )}
-        {authNeeded && (
-          <a className="button primary" style={{ marginTop: 12, display: "inline-flex", textDecoration: "none" }} href={`${API_URL}/login`}>
-            <LogIn size={15} /> Login on backend
-          </a>
         )}
       </div>
 
@@ -201,6 +185,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
                   {item.event.recommendation && <span className="recommendation">{item.event.recommendation}</span>} {item.event.title}
                 </div>
                 <p className="event-message">{item.event.message}</p>
+                <EventDecisionSupport event={item.event} />
                 {item.event.error_code && (
                   <p className="event-message" style={{ color: "#fecaca", marginTop: 8 }}>
                     Error: {item.event.error_code}
@@ -221,16 +206,10 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
         />
         <div className="composer-row">
           <button className="button primary" disabled={busy || !question.trim()} type="submit">
-            <Send size={15} /> Ask
-          </button>
-          <button className="button" disabled={busy || !selectedEvent} onClick={() => runAction("explain")} type="button">
-            <Bot size={15} /> Explain
-          </button>
-          <button className="button" disabled={busy || !selectedEvent} onClick={() => runAction("validate")} type="button">
-            <ShieldCheck size={15} /> Validate
+            <Send size={15} /> Send
           </button>
           <button className="button" disabled={busy} onClick={() => runAction("news")} type="button">
-            <Newspaper size={15} /> News
+            <Newspaper size={15} /> News analysis
           </button>
         </div>
         <div className="hint">
@@ -261,11 +240,75 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
               </button>
             </div>
             <p className="event-message">{newsEvent.message}</p>
+            <EventDecisionSupport event={newsEvent} />
+            <NewsSources event={newsEvent} />
           </div>
         </div>
       )}
     </aside>
   );
+}
+
+function EventDecisionSupport({ event }: { event: AnalystEvent }) {
+  const outlook = asArray<HorizonOutlook>(event.payload?.horizon_outlook);
+  const scenarios = asArray<AnalystScenario>(event.payload?.scenarios);
+  if (outlook.length === 0 && scenarios.length === 0 && !event.risk_notes && !event.invalidation) return null;
+  return (
+    <div className="decision-support">
+      {outlook.map((item) => (
+        <section key={item.horizon}>
+          <strong>{item.horizon}</strong>
+          <p>{item.bias} · momentum {item.momentum.toLowerCase()} · {item.objective}</p>
+          {item.watch_for.length > 0 && <p>Watch: {item.watch_for.join(" · ")}</p>}
+        </section>
+      ))}
+      {scenarios.map((scenario) => (
+        <section key={`${scenario.direction}-${scenario.name}`}>
+          <strong>{scenario.direction}: {scenario.name}</strong>
+          <p>{scenario.condition}</p>
+          <p>{formatScenarioLevels(scenario)}</p>
+          <p>{scenario.plan}</p>
+        </section>
+      ))}
+      {event.risk_notes && <p><strong>Risks:</strong> {event.risk_notes}</p>}
+      {event.invalidation && <p><strong>Invalidation:</strong> {event.invalidation}</p>}
+    </div>
+  );
+}
+
+function NewsSources({ event }: { event: AnalystEvent }) {
+  const snapshot = event.payload?.news_snapshot;
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const items = asArray<{ title?: string; url?: string; source?: string }>((snapshot as Record<string, unknown>).items);
+  if (items.length === 0) return null;
+  return (
+    <section className="news-sources">
+      <h4>Source headlines</h4>
+      {items.map((item, index) => (
+        <a href={item.url} key={`${item.url || item.title}-${index}`} rel="noreferrer" target="_blank">
+          <span>{item.source || "source"}</span> {item.title || "Untitled item"}
+        </a>
+      ))}
+    </section>
+  );
+}
+
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function formatScenarioLevels(scenario: AnalystScenario): string {
+  const entry = scenario.entry_zone_low && scenario.entry_zone_high
+    ? `Entry zone ${formatPrice(scenario.entry_zone_low)}–${formatPrice(scenario.entry_zone_high)}`
+    : "Entry waits for confirmation";
+  const targets = scenario.take_profit.length ? `TP ${scenario.take_profit.map(formatPrice).join(" / ")}` : "TP not supported";
+  const stop = scenario.stop_loss ? `SL ${formatPrice(scenario.stop_loss)}` : "SL not supported";
+  const timeframe = scenario.confirmation_timeframe ? `Confirm on ${scenario.confirmation_timeframe}` : "Confirmation timeframe unavailable";
+  return `${timeframe} · ${entry} · ${targets} · ${stop}`;
+}
+
+function formatPrice(value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
 }
 
 function formatTime(value: string): string {

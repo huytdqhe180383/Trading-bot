@@ -17,11 +17,14 @@ from config import (
     LLM_API_KEY,
     LLM_BASE_URL,
     LLM_BACKGROUND_MODEL,
-    LLM_DAILY_CALL_BUDGET,
     LLM_INTERACTIVE_MODEL,
     LLM_INTERACTIVE_CALL_BUDGET,
+    LLM_SCHEDULED_CALL_BUDGET,
+    LLM_SCREENING_CALL_BUDGET,
+    LLM_STRONG_TIMEOUT_SECS,
     LLM_TIMEOUT_SECS,
     LLM_USE_RESPONSE_FORMAT,
+    LLM_WEAK_TIMEOUT_SECS,
     OPERATIONAL_DATABASE_PATH,
     REPORTS_DIR,
     RESULTS_DIR,
@@ -33,7 +36,7 @@ from .budget import LLMBudget, LLMBudgetExhausted
 from .llm import LLMInvalidResponseError, LLMProviderError, OpenAICompatibleLLMClient
 from .market import fetch_public_snapshot
 from .models import AnalystEvent, AnalystStatus, AnalystValidationError, validate_analyst_payload
-from .news import build_news_snapshot, format_news_message
+from .news import build_news_snapshot
 from .rl_evidence import abstain_envelope, load_rl_evidence
 from .store import AnalystEventStore
 
@@ -99,24 +102,35 @@ class AnalystService:
         symbol: str = "ALL",
         market_snapshot: dict[str, Any] | None = None,
         scope: str = "interactive",
+        analysis_mode: str | None = None,
     ) -> AnalystEvent:
         normalized_symbol = _normalize_symbol(symbol)
+        normalized_scope = _normalize_llm_scope(scope)
+        mode = str(analysis_mode or _default_analysis_mode(normalized_scope)).strip().lower()
         resolved_snapshot = market_snapshot if market_snapshot is not None else _safe_public_snapshot(normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
+            "analysis_mode": mode,
             "market_snapshot": resolved_snapshot,
             "task": (
-                "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
-                "Use only BUY, SELL, REDUCE, HOLD, or AVOID. Do not include quantities, leverage, "
-                "orders, exchange commands, or target allocations."
+                "Return the exact analyst JSON contract. Use only supplied evidence. "
+                "Use BUY, SELL, REDUCE, HOLD, or AVOID and do not include quantities, leverage, "
+                "order types, exchange commands, or target allocations."
             ),
         }
         return self._call_role(
             role="main_analyst",
-            event_type="analysis",
-            title=f"{normalized_symbol} analyst update",
+            event_type="screening" if mode == "screening" else "scheduled_analysis" if mode == "scheduled" else "analysis",
+            title=(
+                f"{normalized_symbol} weak screening"
+                if mode == "screening"
+                else f"{normalized_symbol} scheduled analysis"
+                if mode == "scheduled"
+                else f"{normalized_symbol} analyst update"
+            ),
             prompt_payload=prompt_payload,
-            scope=scope,
+            scope=normalized_scope,
+            event_id=f"screening-{normalized_symbol}" if mode == "screening" else None,
         )
 
     def ask(
@@ -130,17 +144,20 @@ class AnalystService:
         market_snapshot = _safe_public_snapshot(normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
+            "analysis_mode": "manual",
             "question": str(question or "").strip(),
             "market_snapshot": market_snapshot,
             "task": (
-                "Answer as an analyst. Return strict JSON with recommendation, confidence, rationale, "
-                "risk_notes, invalidation. If the user explicitly asks for position advice, give a "
+                "Answer as a thorough decision-support analyst using the exact JSON contract. If the user "
+                "explicitly asks for position advice, give a "
                 "directional advisory view using BUY, SELL, REDUCE, HOLD, or AVOID based on the supplied "
                 "public market snapshot and any auxiliary views. Do not default to HOLD merely because the answer is "
                 "advisory; use HOLD only when the evidence is genuinely balanced or insufficient. If the "
                 "question is not about market direction, recommendation may be HOLD while the rationale "
-                "answers the question. Do not include quantities, leverage, orders, exchange commands, "
-                "or target allocations."
+                "answers the question. Explain momentum, trend, both intraday and swing objectives, and "
+                "two-way conditional scenarios. Include entry/TP/SL only as non-executable scenario levels "
+                "traceable to supplied evidence. Do not include quantities, leverage, order types, exchange "
+                "commands, or target allocations."
             ),
         }
         return self._call_role(
@@ -217,17 +234,7 @@ class AnalystService:
         if related and normalized_symbol == "ALL":
             normalized_symbol = _normalize_symbol(str(related.get("symbol", "ALL")))
         snapshot = build_news_snapshot(symbol=normalized_symbol, limit=8)
-        if snapshot.get("status") == "ok":
-            event = AnalystEvent(
-                event_type="news",
-                status="ok",
-                title=f"{normalized_symbol} public crypto news",
-                message=format_news_message(snapshot, symbol=normalized_symbol),
-                symbol=normalized_symbol,
-                role="system",
-                payload={"alert_id": alert_id, **snapshot},
-            )
-        else:
+        if snapshot.get("status") != "ok":
             event = AnalystEvent(
                 event_type="news",
                 status="error",
@@ -238,7 +245,27 @@ class AnalystService:
                 error_code="news_unavailable",
                 payload={"alert_id": alert_id, **snapshot},
             )
-        return self.store.append(event)
+            return self.store.append(event)
+        market_snapshot = _safe_public_snapshot(normalized_symbol)
+        return self._call_role(
+            role="main_analyst",
+            event_type="news_analysis",
+            title=f"{normalized_symbol} news and market analysis",
+            prompt_payload={
+                "symbol": normalized_symbol,
+                "alert_id": alert_id,
+                "analysis_mode": "news",
+                "market_snapshot": market_snapshot,
+                "news_snapshot": snapshot,
+                "task": (
+                    "Analyze the supplied public headlines with the current market evidence using the exact "
+                    "analyst JSON contract. Attribute claims, identify what needs primary-source verification, "
+                    "explain likely intraday and swing implications, and state whether to wait before or reassess "
+                    "after a catalyst. Do not treat a headline as confirmed fact."
+                ),
+            },
+            scope="interactive",
+        )
 
     def _call_role(
         self,
@@ -248,11 +275,12 @@ class AnalystService:
         title: str,
         prompt_payload: dict[str, Any],
         scope: str,
+        event_id: str | None = None,
     ) -> AnalystEvent:
         normalized_scope = _normalize_llm_scope(scope)
         llm_client = self._llm_client_for_scope(normalized_scope)
         prompt_payload = {
-            **{key: value for key, value in prompt_payload.items() if key != "news_snapshot"},
+            **prompt_payload,
             "scope": normalized_scope,
             "llm_model": getattr(llm_client, "model", ""),
             "rl_evidence": prompt_payload.get("rl_evidence", self._safe_rl_evidence()),
@@ -325,7 +353,12 @@ class AnalystService:
                 "llm_model": getattr(llm_client, "model", ""),
                 "prompt_version": ANALYST_PROMPT_VERSION,
                 "chart_annotations": parsed["chart_annotations"],
+                "horizon_outlook": parsed["horizon_outlook"],
+                "scenarios": parsed["scenarios"],
+                "catalyst_watch": parsed["catalyst_watch"],
+                **({"news_snapshot": prompt_payload["news_snapshot"]} if "news_snapshot" in prompt_payload else {}),
             },
+            **({"id": event_id} if event_id else {}),
         )
         return self.store.append(event)
 
@@ -339,7 +372,7 @@ class AnalystService:
             ),
         ):
             try:
-                self.budget.reserve("background")
+                self.budget.reserve("screening")
                 raw = self.background_llm_client.chat_json(
                     messages=[
                         {
@@ -405,7 +438,7 @@ class AnalystService:
         return self.store.append(event)
 
     def _llm_client_for_scope(self, scope: str) -> OpenAICompatibleLLMClient:
-        if _normalize_llm_scope(scope) == "background":
+        if _normalize_llm_scope(scope) == "screening":
             return self.background_llm_client
         return self.interactive_llm_client
 
@@ -428,7 +461,7 @@ def create_default_analyst_service() -> AnalystService:
             api_key=LLM_API_KEY,
             model=LLM_INTERACTIVE_MODEL,
             model_config_name="LLM_STRONG_MODEL or LLM_INTERACTIVE_MODEL",
-            timeout_secs=LLM_TIMEOUT_SECS,
+            timeout_secs=LLM_STRONG_TIMEOUT_SECS or LLM_TIMEOUT_SECS,
             use_response_format=LLM_USE_RESPONSE_FORMAT,
         ),
         background_llm_client=OpenAICompatibleLLMClient(
@@ -436,11 +469,12 @@ def create_default_analyst_service() -> AnalystService:
             api_key=LLM_API_KEY,
             model=LLM_BACKGROUND_MODEL,
             model_config_name="LLM_WEAK_MODEL or LLM_BACKGROUND_MODEL",
-            timeout_secs=LLM_TIMEOUT_SECS,
+            timeout_secs=LLM_WEAK_TIMEOUT_SECS or LLM_TIMEOUT_SECS,
             use_response_format=LLM_USE_RESPONSE_FORMAT,
         ),
         budget=LLMBudget(
-            background_daily_limit=LLM_DAILY_CALL_BUDGET,
+            background_daily_limit=LLM_SCREENING_CALL_BUDGET,
+            scheduled_daily_limit=LLM_SCHEDULED_CALL_BUDGET,
             interactive_daily_limit=LLM_INTERACTIVE_CALL_BUDGET,
             tz_name=LIVE_SESSION_TIMEZONE,
         ),
@@ -482,7 +516,20 @@ def _safe_public_snapshot(symbol: str) -> dict[str, Any]:
 
 
 def _normalize_llm_scope(scope: str) -> str:
-    return "background" if str(scope or "").strip().lower() == "background" else "interactive"
+    normalized = str(scope or "").strip().lower()
+    if normalized in {"background", "screening"}:
+        return "screening"
+    if normalized == "scheduled":
+        return "scheduled"
+    return "interactive"
+
+
+def _default_analysis_mode(scope: str) -> str:
+    if scope == "screening":
+        return "screening"
+    if scope == "scheduled":
+        return "scheduled"
+    return "manual"
 
 
 def _public_event(row: dict[str, Any]) -> dict[str, Any]:

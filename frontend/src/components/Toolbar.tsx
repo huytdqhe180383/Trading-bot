@@ -1,7 +1,6 @@
 "use client";
 
-import { Bot, Eraser, LineChart, Newspaper, PenLine, RefreshCcw } from "lucide-react";
-import { fetchLatestNews, runAnalystUpdate } from "@/lib/api";
+import { ChevronDown, Eraser, LineChart, PenLine, RefreshCcw } from "lucide-react";
 import type { ChartInterval, IndicatorKey, SymbolCode } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
 
@@ -17,13 +16,16 @@ const INTERVALS: { value: ChartInterval; label: string }[] = [
 
 type ToolbarProps = {
   drawingEnabled: boolean;
-  busy: boolean;
-  setBusy: (busy: boolean) => void;
-  setError: (message: string) => void;
   onToggleDrawing: () => void;
 };
 
-export default function Toolbar({ drawingEnabled, busy, setBusy, setError, onToggleDrawing }: ToolbarProps) {
+const INDICATOR_LABELS: Record<IndicatorKey, string> = {
+  sma20: "SMA 20",
+  ema50: "EMA 50",
+  volume: "Volume",
+};
+
+export default function Toolbar({ drawingEnabled, onToggleDrawing }: ToolbarProps) {
   const {
     symbol,
     interval,
@@ -31,23 +33,9 @@ export default function Toolbar({ drawingEnabled, busy, setBusy, setError, onTog
     setSymbol,
     setInterval,
     toggleIndicator,
-    upsertEvent,
     requestSupportResistance,
     clearChartOverlays,
   } = useTradingStore();
-
-  const runAction = async (action: "update" | "news") => {
-    setBusy(true);
-    setError("");
-    try {
-      const event = action === "news" ? await fetchLatestNews(symbol) : await runAnalystUpdate(symbol);
-      upsertEvent(event);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Analyst request failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div className="toolbar glass-panel">
@@ -70,16 +58,23 @@ export default function Toolbar({ drawingEnabled, busy, setBusy, setError, onTog
       </div>
 
       <div className="toolbar-group">
-        {(["sma20", "ema50"] as IndicatorKey[]).map((indicator) => (
-          <button
-            className={`button ${indicators[indicator] ? "primary" : "ghost"}`}
-            key={indicator}
-            onClick={() => toggleIndicator(indicator)}
-            type="button"
-          >
-            {indicator.toUpperCase()}
-          </button>
-        ))}
+        <details className="indicator-menu">
+          <summary className="button ghost">
+            Indicators <ChevronDown size={14} />
+          </summary>
+          <div className="indicator-menu-panel">
+            {(Object.keys(INDICATOR_LABELS) as IndicatorKey[]).map((indicator) => (
+              <label className="indicator-option" key={indicator}>
+                <input
+                  checked={indicators[indicator]}
+                  onChange={() => toggleIndicator(indicator)}
+                  type="checkbox"
+                />
+                <span>{INDICATOR_LABELS[indicator]}</span>
+              </label>
+            ))}
+          </div>
+        </details>
       </div>
 
       <div className="toolbar-group">
@@ -91,12 +86,6 @@ export default function Toolbar({ drawingEnabled, busy, setBusy, setError, onTog
         </button>
         <button className="button ghost" onClick={clearChartOverlays} type="button">
           <Eraser size={15} /> Clear lines
-        </button>
-        <button className="button" disabled={busy} onClick={() => runAction("update")} type="button">
-          <Bot size={15} /> Analyst update
-        </button>
-        <button className="button" disabled={busy} onClick={() => runAction("news")} type="button">
-          <Newspaper size={15} /> Latest news
         </button>
         <button className="button ghost" onClick={() => window.location.reload()} type="button">
           <RefreshCcw size={15} /> Reload

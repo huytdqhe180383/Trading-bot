@@ -37,11 +37,8 @@ export default function Home() {
         <div className="workspace">
           <section className="chart-workspace">
             <Toolbar
-              busy={busy}
               drawingEnabled={drawingEnabled}
               onToggleDrawing={() => setDrawingEnabled((enabled) => !enabled)}
-              setBusy={setBusy}
-              setError={setError}
             />
             {error && <div className="event-card error">{error}</div>}
             <ChartPanel drawingEnabled={drawingEnabled} setError={setError} />

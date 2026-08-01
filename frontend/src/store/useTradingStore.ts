@@ -25,6 +25,7 @@ export const useTradingStore = create<TradingState>((set) => ({
   indicators: {
     sma20: true,
     ema50: false,
+    volume: true,
   },
   events: [],
   selectedEventId: "",

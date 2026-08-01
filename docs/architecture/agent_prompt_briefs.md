@@ -47,7 +47,9 @@ material risks, and concrete invalidation conditions. Answer operator questions
 in plain language and distinguish `BUY`, `SELL`, `REDUCE`, `HOLD`, and `AVOID`.
 
 **Must not do:** Invent data, cite unavailable sources, set allocations, sizes,
-leverage, entry prices, or exchange commands.
+leverage, order types, or exchange commands. Conditional entry, TP, and SL
+levels are permitted only as advisory scenarios traceable to supplied zones or
+volatility facts; they are not order suggestions.
 
 **Required output:** the validated analyst schema: recommendation, confidence
 score or `null`, rationale, risk notes, and invalidation. The compact text
@@ -73,18 +75,18 @@ counter-thesis, and data gaps.
 
 **Current prompt:** `tradingbot/prompts/agent_roles.py`, `technical_analyst`.
 
-### Public-news utility (not an LLM role)
+### Public-news analysis
 
-`latest_news` remains an operator-facing status utility, but no news snapshot
-is passed to an LLM role. A news analyst is intentionally deferred until a
-source with adequate attribution, timestamps, coverage, and reliability checks
-is available.
+`latest_news` collects the bounded public snapshot and passes it, as untrusted
+evidence, to the strong main analyst. The result appears in a dedicated popup
+with the original source links, current-market interpretation, catalyst timing
+limits, and wait/reassess conditions.
 
-The utility combines crypto RSS headlines with recent original X posts from
+The source layer combines crypto RSS headlines with recent original X posts from
 configured official macro accounts. X requires `X_NEWS_BEARER_TOKEN` and is an
 alert layer only: follow its link and verify every release or revision at the
 issuer's primary website before relying on it. The utility never feeds an LLM
-or bypasses deterministic risk controls.
+claim directly into execution and never bypasses deterministic risk controls.
 
 ### Risk validator
 

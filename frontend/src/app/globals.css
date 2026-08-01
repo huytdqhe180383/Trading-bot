@@ -142,6 +142,46 @@ button {
   gap: 8px;
 }
 
+.indicator-menu {
+  position: relative;
+}
+
+.indicator-menu summary {
+  list-style: none;
+}
+
+.indicator-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.indicator-menu-panel {
+  position: absolute;
+  z-index: 40;
+  top: 44px;
+  left: 0;
+  min-width: 170px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-strong);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
+}
+
+.indicator-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.indicator-option:hover {
+  background: rgba(148, 163, 184, 0.1);
+}
+
 .select,
 .input,
 .textarea {
@@ -328,6 +368,31 @@ button {
   font-size: 13px;
 }
 
+.scanner-heartbeat {
+  color: #86efac !important;
+}
+
+.decision-support {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border);
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.decision-support section {
+  padding: 9px;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.42);
+}
+
+.decision-support p {
+  margin: 4px 0 0;
+}
+
 .event-actions {
   display: flex;
   gap: 8px;
@@ -387,6 +452,35 @@ button {
 .news-modal-header h3 {
   margin: 0;
   font-size: 18px;
+}
+
+.news-sources {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.news-sources h4 {
+  margin: 0 0 4px;
+}
+
+.news-sources a {
+  color: #bae6fd;
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.news-sources a:hover {
+  text-decoration: underline;
+}
+
+.news-sources span {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 10px;
 }
 
 .composer-row {

@@ -168,6 +168,56 @@ class AnalystLLMTest(unittest.TestCase):
                 }
             )
 
+    def test_manual_scenario_contract_preserves_conditional_tp_and_sl(self):
+        parsed = validate_analyst_payload(
+            {
+                "recommendation": "BUY",
+                "rationale": "A supplied resistance break would improve momentum.",
+                "horizon_outlook": [
+                    {
+                        "horizon": "INTRADAY",
+                        "timeframes": ["15m", "1h"],
+                        "bias": "BULLISH",
+                        "momentum": "ACCELERATING",
+                        "objective": "Test the next supplied resistance zone.",
+                        "watch_for": ["15m close above resistance"],
+                    }
+                ],
+                "scenarios": [
+                    {
+                        "name": "Confirmed breakout",
+                        "direction": "BULLISH",
+                        "condition": "15m candle accepts above supplied resistance.",
+                        "confirmation_timeframe": "15m",
+                        "entry_zone_low": 100.0,
+                        "entry_zone_high": 101.0,
+                        "take_profit": [104.0, 108.0],
+                        "stop_loss": 98.0,
+                        "plan": "Wait for confirmation before reassessing.",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(parsed["scenarios"][0]["take_profit"], [104.0, 108.0])
+        self.assertEqual(parsed["scenarios"][0]["stop_loss"], 98.0)
+
+    def test_manual_scenario_rejects_reversed_entry_zone(self):
+        with self.assertRaises(AnalystValidationError):
+            validate_analyst_payload(
+                {
+                    "recommendation": "AVOID",
+                    "scenarios": [
+                        {
+                            "name": "Invalid zone",
+                            "direction": "BULLISH",
+                            "entry_zone_low": 101.0,
+                            "entry_zone_high": 100.0,
+                        }
+                    ],
+                }
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

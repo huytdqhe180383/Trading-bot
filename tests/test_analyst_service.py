@@ -57,7 +57,7 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertEqual(event.recommendation, "HOLD")
             self.assertNotIn("orders", event.to_public_dict())
             self.assertNotIn("news_snapshot", event.payload)
-            self.assertEqual(event.payload["prompt_version"], "crypto_research_v1")
+            self.assertEqual(event.payload["prompt_version"], "crypto_research_v2")
             self.assertEqual(event.payload["rl_evidence"]["status"], "ABSTAIN")
             events = service.events()
             self.assertEqual(len(events), 1)
@@ -172,11 +172,14 @@ class AnalystServiceTest(unittest.TestCase):
             )
 
             background_event = service.run_update(symbol="BTCUSDT", scope="background")
+            scheduled_event = service.run_update(symbol="BTCUSDT", scope="scheduled")
             chat_event = service.ask(question="Deep read?", symbol="BTCUSDT", scope="interactive")
 
             self.assertEqual(background_llm.calls, 2)
-            self.assertEqual(interactive_llm.calls, 1)
+            self.assertEqual(interactive_llm.calls, 2)
             self.assertEqual(background_event.payload["llm_model"], "cheap-model")
+            self.assertEqual(scheduled_event.payload["llm_model"], "strong-model")
+            self.assertEqual(scheduled_event.payload["llm_scope"], "scheduled")
             self.assertEqual(chat_event.payload["llm_model"], "strong-model")
             self.assertEqual([view["role"] for view in chat_event.payload["auxiliary_views"]], ["technical_analyst"])
 
@@ -196,6 +199,28 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertNotIn("news_snapshot", prompt)
             self.assertIn("ABSTAIN is no RL opinion", llm.last_kwargs["messages"][0]["content"])
             self.assertIn("Do not default to HOLD merely because the answer is advisory", prompt)
+            self.assertIn('"analysis_mode": "manual"', prompt)
+            self.assertIn("two-way conditional scenarios", prompt)
+
+    def test_news_button_uses_strong_model_and_preserves_sources(self):
+        with TemporaryDirectory() as tmp_name:
+            tmp = type("Tmp", (), {"name": tmp_name})
+            llm = _FakeLLM()
+            service = self._service(tmp, llm=llm)
+            snapshot = {
+                "status": "ok",
+                "source": "public_crypto_rss",
+                "items": [{"title": "Macro release ahead", "url": "https://example.test/news"}],
+            }
+
+            with patch("tradingbot.analyst.service.build_news_snapshot", return_value=snapshot), patch(
+                "tradingbot.analyst.service.fetch_public_snapshot", return_value={"source": "okx_public"}
+            ):
+                event = service.latest_news(symbol="BTCUSDT")
+
+            self.assertEqual(event.event_type, "news_analysis")
+            self.assertEqual(event.payload["news_snapshot"], snapshot)
+            self.assertIn('"analysis_mode": "news"', llm.last_kwargs["messages"][1]["content"])
 
     def test_rl_evidence_provider_error_fails_closed(self):
         with TemporaryDirectory() as tmp_name:

@@ -68,7 +68,7 @@ describe("AnalystSidebar", () => {
     fireEvent.change(screen.getByPlaceholderText("Ask the analyst about BTCUSDT..."), {
       target: { value: "Should I take a position?" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /ask/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
 
     expect(await screen.findByText("Should I take a position?")).toBeInTheDocument();
     expect(await screen.findByText("Directional advisory answer.")).toBeInTheDocument();
@@ -83,5 +83,14 @@ describe("AnalystSidebar", () => {
     expect(screen.getByText("BTCUSDT public crypto news")).toBeInTheDocument();
     expect(screen.getByText(/News item one/)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText("system")).not.toBeInTheDocument());
+  });
+
+  it("shows only send and news analysis actions", () => {
+    render(<AnalystSidebar busy={false} setBusy={vi.fn()} setError={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /send/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /news analysis/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /explain/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /validate/i })).not.toBeInTheDocument();
   });
 });

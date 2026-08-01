@@ -256,6 +256,10 @@ UI_CORS_ALLOWED_ORIGINS = _env_csv("UI_CORS_ALLOWED_ORIGINS", ("http://127.0.0.1
 # ANALYST-ONLY LLM / DISCORD SETTINGS
 # ============================================================
 ANALYST_ENABLED = _env_bool("ANALYST_ENABLED", False)
+# Dedicated cadence names avoid inheriting older installations' 300-second
+# ANALYST_SCAN_INTERVAL_SECS value. The legacy names remain import-compatible.
+ANALYST_WEAK_SCREEN_INTERVAL_SECS = _env_int("ANALYST_WEAK_SCREEN_INTERVAL_SECS", 15)
+ANALYST_STRONG_ANALYSIS_CADENCE = _env_str("ANALYST_STRONG_ANALYSIS_CADENCE", "15m")
 ANALYST_SCAN_INTERVAL_SECS = _env_int("ANALYST_SCAN_INTERVAL_SECS", 15)
 ANALYST_BACKGROUND_ANALYSIS_CADENCE = _env_str("ANALYST_BACKGROUND_ANALYSIS_CADENCE", "15m")
 ANALYST_SIGNIFICANT_CONFIDENCE = _env_float("ANALYST_SIGNIFICANT_CONFIDENCE", 0.65)
@@ -298,8 +302,15 @@ LLM_STRONG_MODEL = _env_str("LLM_STRONG_MODEL", LLM_MODEL)
 LLM_BACKGROUND_MODEL = _env_str("LLM_BACKGROUND_MODEL", LLM_WEAK_MODEL)
 LLM_INTERACTIVE_MODEL = _env_str("LLM_INTERACTIVE_MODEL", LLM_STRONG_MODEL)
 LLM_TIMEOUT_SECS = _env_float("LLM_TIMEOUT_SECS", 20.0)
+LLM_WEAK_TIMEOUT_SECS = _env_float("LLM_WEAK_TIMEOUT_SECS", 20.0)
+LLM_STRONG_TIMEOUT_SECS = _env_float("LLM_STRONG_TIMEOUT_SECS", 60.0)
 LLM_USE_RESPONSE_FORMAT = _env_bool("LLM_USE_RESPONSE_FORMAT", False)
+# Screening and scheduled analysis have deliberately separate budgets so the
+# high-frequency weak lane cannot consume the operator's manual strong-model
+# allowance. The legacy background budget remains import-compatible.
 LLM_DAILY_CALL_BUDGET = _env_int("LLM_DAILY_CALL_BUDGET", 8)
+LLM_SCREENING_CALL_BUDGET = _env_int("LLM_SCREENING_CALL_BUDGET", 12_000)
+LLM_SCHEDULED_CALL_BUDGET = _env_int("LLM_SCHEDULED_CALL_BUDGET", 200)
 LLM_INTERACTIVE_CALL_BUDGET = _env_int("LLM_INTERACTIVE_CALL_BUDGET", 12)
 
 DISCORD_BOT_TOKEN = _env_str("DISCORD_BOT_TOKEN", "")

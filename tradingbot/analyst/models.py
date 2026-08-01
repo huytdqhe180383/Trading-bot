@@ -104,6 +104,9 @@ def validate_analyst_payload(raw: dict[str, Any]) -> dict[str, Any]:
         if confidence < 0.0 or confidence > 1.0:
             raise AnalystValidationError("confidence must be between 0 and 1.")
     chart_annotations = _validate_chart_annotations(raw.get("chart_annotations", []))
+    horizon_outlook = _validate_horizon_outlook(raw.get("horizon_outlook", []))
+    scenarios = _validate_scenarios(raw.get("scenarios", []))
+    catalyst_watch = _validate_catalyst_watch(raw.get("catalyst_watch", []))
 
     return {
         "recommendation": recommendation,
@@ -112,7 +115,105 @@ def validate_analyst_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "risk_notes": str(raw.get("risk_notes", "")).strip(),
         "invalidation": str(raw.get("invalidation", "")).strip(),
         "chart_annotations": chart_annotations,
+        "horizon_outlook": horizon_outlook,
+        "scenarios": scenarios,
+        "catalyst_watch": catalyst_watch,
     }
+
+
+def _validate_horizon_outlook(raw: Any) -> list[dict[str, Any]]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 2:
+        raise AnalystValidationError("horizon_outlook must contain at most intraday and swing views.")
+    validated = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise AnalystValidationError("Each horizon outlook must be an object.")
+        horizon = str(item.get("horizon", "")).strip().upper()
+        bias = str(item.get("bias", "")).strip().upper()
+        momentum = str(item.get("momentum", "")).strip().upper()
+        if horizon not in {"INTRADAY", "SWING"}:
+            raise AnalystValidationError("horizon_outlook horizon must be INTRADAY or SWING.")
+        if bias not in {"BULLISH", "BEARISH", "NEUTRAL", "MIXED", "UNKNOWN"}:
+            raise AnalystValidationError("Unsupported horizon_outlook bias.")
+        if momentum not in {"ACCELERATING", "STEADY", "WEAKENING", "REVERSING", "MIXED", "UNKNOWN"}:
+            raise AnalystValidationError("Unsupported horizon_outlook momentum.")
+        timeframes = item.get("timeframes", [])
+        if not isinstance(timeframes, list) or len(timeframes) > 5:
+            raise AnalystValidationError("horizon_outlook timeframes must be a list of at most five items.")
+        watch_for = item.get("watch_for", [])
+        if not isinstance(watch_for, list) or len(watch_for) > 5:
+            raise AnalystValidationError("horizon_outlook watch_for must be a list of at most five items.")
+        validated.append(
+            {
+                "horizon": horizon,
+                "timeframes": [str(value).strip() for value in timeframes if str(value).strip()],
+                "bias": bias,
+                "momentum": momentum,
+                "objective": str(item.get("objective", "")).strip(),
+                "watch_for": [str(value).strip() for value in watch_for if str(value).strip()],
+            }
+        )
+    return validated
+
+
+def _validate_scenarios(raw: Any) -> list[dict[str, Any]]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 3:
+        raise AnalystValidationError("scenarios must be a list of at most three items.")
+    validated = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise AnalystValidationError("Each scenario must be an object.")
+        direction = str(item.get("direction", "")).strip().upper()
+        if direction not in {"BULLISH", "BEARISH", "NEUTRAL"}:
+            raise AnalystValidationError("Unsupported scenario direction.")
+        take_profit = item.get("take_profit", [])
+        if not isinstance(take_profit, list) or len(take_profit) > 3:
+            raise AnalystValidationError("scenario take_profit must be a list of at most three prices.")
+        entry_zone_low = _optional_positive_number(item.get("entry_zone_low"), field="entry_zone_low")
+        entry_zone_high = _optional_positive_number(item.get("entry_zone_high"), field="entry_zone_high")
+        if entry_zone_low is not None and entry_zone_high is not None and entry_zone_low > entry_zone_high:
+            raise AnalystValidationError("scenario entry_zone_low cannot exceed entry_zone_high.")
+        validated.append(
+            {
+                "name": str(item.get("name", "")).strip()[:80],
+                "direction": direction,
+                "condition": str(item.get("condition", "")).strip(),
+                "confirmation_timeframe": str(item.get("confirmation_timeframe", "")).strip() or None,
+                "entry_zone_low": entry_zone_low,
+                "entry_zone_high": entry_zone_high,
+                "take_profit": [_positive_finite_number(value, field="take_profit") for value in take_profit],
+                "stop_loss": _optional_positive_number(item.get("stop_loss"), field="stop_loss"),
+                "plan": str(item.get("plan", "")).strip(),
+            }
+        )
+    return validated
+
+
+def _validate_catalyst_watch(raw: Any) -> list[dict[str, Any]]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 5:
+        raise AnalystValidationError("catalyst_watch must be a list of at most five items.")
+    validated = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise AnalystValidationError("Each catalyst watch item must be an object.")
+        action = str(item.get("action", "")).strip().upper()
+        if action not in {"WAIT_BEFORE", "MONITOR_AFTER", "NONE"}:
+            raise AnalystValidationError("Unsupported catalyst watch action.")
+        validated.append(
+            {
+                "event": str(item.get("event", "")).strip(),
+                "timing": str(item.get("timing", "")).strip(),
+                "action": action,
+                "condition": str(item.get("condition", "")).strip(),
+            }
+        )
+    return validated
 
 
 def _validate_chart_annotations(raw: Any) -> list[dict[str, Any]]:
@@ -160,6 +261,12 @@ def _positive_finite_number(value: Any, *, field: str) -> float:
     if number <= 0.0 or number == float("inf") or number != number:
         raise AnalystValidationError(f"{field} must be a positive finite number.")
     return number
+
+
+def _optional_positive_number(value: Any, *, field: str) -> float | None:
+    if value is None or value == "":
+        return None
+    return _positive_finite_number(value, field=field)
 
 
 def _find_forbidden_key(value: Any) -> str | None:

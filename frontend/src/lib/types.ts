@@ -38,6 +38,10 @@ export type AnalystBudget = {
   background_limit: number;
   interactive_used: number;
   interactive_limit: number;
+  screening_used?: number;
+  screening_limit?: number;
+  scheduled_used?: number;
+  scheduled_limit?: number;
 };
 
 export type ChartAnnotation =
@@ -45,4 +49,25 @@ export type ChartAnnotation =
   | { kind: "resistance"; price: number; label: string }
   | { kind: "trend"; start_time: string; start_price: number; end_time: string; end_price: number; label: string };
 
-export type IndicatorKey = "sma20" | "ema50";
+export type IndicatorKey = "sma20" | "ema50" | "volume";
+
+export type HorizonOutlook = {
+  horizon: "INTRADAY" | "SWING";
+  timeframes: string[];
+  bias: "BULLISH" | "BEARISH" | "NEUTRAL" | "MIXED" | "UNKNOWN";
+  momentum: "ACCELERATING" | "STEADY" | "WEAKENING" | "REVERSING" | "MIXED" | "UNKNOWN";
+  objective: string;
+  watch_for: string[];
+};
+
+export type AnalystScenario = {
+  name: string;
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  condition: string;
+  confirmation_timeframe: string | null;
+  entry_zone_low: number | null;
+  entry_zone_high: number | null;
+  take_profit: number[];
+  stop_loss: number | null;
+  plan: string;
+};

@@ -276,6 +276,10 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
   }, [candles, indicators.ema50, indicators.sma20]);
 
   useEffect(() => {
+    volumeSeriesRef.current?.applyOptions({ visible: indicators.volume });
+  }, [indicators.volume]);
+
+  useEffect(() => {
     const chart = chartRef.current;
     const candleSeries = candleSeriesRef.current;
     if (!chart || !candleSeries) return;

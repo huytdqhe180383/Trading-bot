@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import subprocess
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -49,6 +50,7 @@ from ui.services import (
 )
 from tradingbot.analyst import AnalystService, create_default_analyst_service
 from tradingbot.analyst.market import fetch_public_candles
+from tradingbot.analyst.scanner import create_default_scanner
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
@@ -155,11 +157,80 @@ def _render_template(
     return TEMPLATES.TemplateResponse(request, template_name, context, status_code=status_code)
 
 
+def _cadence_seconds(value: str) -> int:
+    text = str(value or "15m").strip().lower()
+    try:
+        if text.endswith("s"):
+            return max(1, int(text[:-1]))
+        if text.endswith("m"):
+            return max(1, int(text[:-1]) * 60)
+        if text.endswith("h"):
+            return max(1, int(text[:-1]) * 3600)
+    except ValueError:
+        pass
+    return 900
+
+
+def _scheduler_result_summary(results: list[dict[str, Any]]) -> list[dict[str, str]]:
+    keys = ("status", "symbol", "stage", "error", "event_type", "created_at_utc")
+    return [
+        {key: str(result.get(key, "")) for key in keys if result.get(key) not in (None, "")}
+        for result in results
+    ]
+
+
 def create_app(ctx: UIAppContext | None = None) -> FastAPI:
-    app = FastAPI(title="Trading Bot Private UI")
     context = ctx or UIAppContext()
     if context.analyst_service is None:
         context.analyst_service = create_default_analyst_service()
+    run_embedded_scanner = ctx is None and context.analyst_service.enabled
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        scanner_tasks: list[asyncio.Task[None]] = []
+        if run_embedded_scanner:
+            scanner = create_default_scanner(service=context.analyst_service)
+            app.state.analyst_scanner = scanner
+
+            async def periodic_loop(worker: Callable[[], list[dict]], interval_secs: int) -> None:
+                while True:
+                    started = asyncio.get_running_loop().time()
+                    try:
+                        await asyncio.to_thread(worker)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        # Scanner failures are reflected by a stale screening
+                        # heartbeat; the API must remain available for manual use.
+                        pass
+                    elapsed = asyncio.get_running_loop().time() - started
+                    await asyncio.sleep(max(0.0, interval_secs - elapsed))
+
+            scanner_tasks = [
+                asyncio.create_task(
+                    periodic_loop(scanner.run_screening_once, max(1, int(scanner.scan_interval_secs))),
+                    name="analyst-screening",
+                ),
+                asyncio.create_task(
+                    periodic_loop(scanner.run_scheduled_once, _cadence_seconds(scanner.background_analysis_cadence)),
+                    name="analyst-scheduled",
+                ),
+            ]
+            app.state.analyst_scheduler_tasks = {task.get_name(): task for task in scanner_tasks}
+        try:
+            yield
+        finally:
+            for task in scanner_tasks:
+                task.cancel()
+            for task in scanner_tasks:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    app = FastAPI(title="Trading Bot Private UI", lifespan=lifespan)
+    app.state.analyst_scheduler_tasks = {}
+    app.state.analyst_scanner = None
     app.state.ctx = context
     app.add_middleware(
         SessionMiddleware,
@@ -303,7 +374,32 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
     @app.get("/api/analyst/status")
     async def api_analyst_status(request: Request) -> JSONResponse:
         _ensure_local_session(request)
-        return JSONResponse(context.analyst_service.status().to_dict())
+        payload = context.analyst_service.status().to_dict()
+        scheduler_tasks = getattr(app.state, "analyst_scheduler_tasks", {})
+        scanner = getattr(app.state, "analyst_scanner", None)
+        payload["scheduler"] = {
+            "enabled": run_embedded_scanner,
+            "screening_interval_secs": getattr(scanner, "scan_interval_secs", None),
+            "scheduled_cadence": getattr(scanner, "background_analysis_cadence", ""),
+            "last_screening_completed_at": getattr(scanner, "last_screening_completed_at", ""),
+            "last_screening_results": _scheduler_result_summary(getattr(scanner, "last_screening_results", [])),
+            "screening_stage_by_symbol": getattr(scanner, "screening_stage_by_symbol", {}),
+            "last_scheduled_completed_at": getattr(scanner, "last_scheduled_completed_at", ""),
+            "last_scheduled_results": _scheduler_result_summary(getattr(scanner, "last_scheduled_results", [])),
+            "tasks": {
+                name: {
+                    "running": not task.done(),
+                    "cancelled": task.cancelled(),
+                    "error": (
+                        type(task.exception()).__name__
+                        if task.done() and not task.cancelled() and task.exception() is not None
+                        else ""
+                    ),
+                }
+                for name, task in scheduler_tasks.items()
+            },
+        }
+        return JSONResponse(payload)
 
     @app.post("/api/analyst/run")
     async def api_analyst_run(request: Request, payload: AnalystRunRequest) -> JSONResponse:

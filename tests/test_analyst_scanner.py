@@ -1,10 +1,42 @@
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
-from tradingbot.analyst.scanner import _cadence_key
+from tradingbot.analyst.models import AnalystEvent
+from tradingbot.analyst.scanner import AnalystScanner, _cadence_key
+
+
+class _FakeService:
+    def __init__(self):
+        self.calls = []
+
+    def run_update(self, **kwargs):
+        self.calls.append(kwargs)
+        return AnalystEvent(
+            event_type=kwargs["analysis_mode"],
+            status="ok",
+            title="test",
+            message="test",
+            symbol=kwargs["symbol"],
+            role="main_analyst",
+            recommendation="AVOID",
+        )
 
 
 class AnalystScannerTest(unittest.TestCase):
+    def test_each_cycle_uses_weak_screening_and_only_one_strong_call_per_cadence(self):
+        service = _FakeService()
+        scanner = AnalystScanner(service=service, symbols=("BTCUSDT",), background_analysis_cadence="15m")
+        snapshot = {"fifteen_minute": {"window_return_pct": 0.1}, "one_hour": {"window_return_pct": 0.2}}
+
+        with patch("tradingbot.analyst.scanner.fetch_screening_snapshot", return_value=snapshot), patch(
+            "tradingbot.analyst.scanner.fetch_public_snapshot", return_value={"timeframes": {}}
+        ):
+            scanner.run_once()
+            scanner.run_once()
+
+        self.assertEqual([call["scope"] for call in service.calls], ["screening", "scheduled", "screening"])
+        self.assertEqual([call["analysis_mode"] for call in service.calls], ["screening", "scheduled", "screening"])
     def test_cadence_key_groups_five_minute_windows(self):
         first = datetime(2026, 7, 15, 12, 4, 59, tzinfo=timezone.utc)
         second = datetime(2026, 7, 15, 12, 5, 0, tzinfo=timezone.utc)

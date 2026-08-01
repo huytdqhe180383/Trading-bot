@@ -7,7 +7,7 @@ event schema is independently evolved and validated end to end.
 
 from __future__ import annotations
 
-ANALYST_PROMPT_VERSION = "crypto_research_v1"
+ANALYST_PROMPT_VERSION = "crypto_research_v2"
 RISK_GATE_PROMPT_VERSION = "portfolio_risk_v1"
 
 _ANALYST_COMMON = """
@@ -32,13 +32,26 @@ Return only one JSON object. No Markdown, prose outside JSON, hidden reasoning,
 citations, or undeclared fields. The exact response schema is:
 {"recommendation":"BUY|SELL|REDUCE|HOLD|AVOID","confidence":number|null,
  "rationale":"string","risk_notes":"string","invalidation":"string",
+ "horizon_outlook":[{"horizon":"INTRADAY|SWING","timeframes":["string"],
+  "bias":"BULLISH|BEARISH|NEUTRAL|MIXED|UNKNOWN",
+  "momentum":"ACCELERATING|STEADY|WEAKENING|REVERSING|MIXED|UNKNOWN",
+  "objective":"string","watch_for":["string"]}],
+ "scenarios":[{"name":"string","direction":"BULLISH|BEARISH|NEUTRAL",
+  "condition":"string","confirmation_timeframe":"string|null",
+  "entry_zone_low":number|null,"entry_zone_high":number|null,
+  "take_profit":[number],"stop_loss":number|null,"plan":"string"}],
+ "catalyst_watch":[{"event":"string","timing":"string",
+  "action":"WAIT_BEFORE|MONITOR_AFTER|NONE","condition":"string"}],
  "chart_annotations":[{"kind":"support|resistance","price":number,"label":"string"}
   | {"kind":"trend","start_time":"ISO-8601","start_price":number,
      "end_time":"ISO-8601","end_price":number,"label":"string"}]}
 `confidence` is an uncalibrated evidence-strength score, not a probability;
 use null when the supplied evidence cannot support one. Never include a size,
-quantity, allocation, leverage, price target, order, exchange command,
-credential, or trade instruction.
+quantity, allocation, leverage, order type, exchange command, credential, or
+claim of execution. Conditional entry/TP/SL levels are advisory scenario
+planning only. Include them only in `scenarios`, only when every number is
+traceable to a supplied price zone or deterministic volatility field, and use
+null or an empty list when no defensible level is supplied.
 `chart_annotations` is optional and limited to six supplied-evidence zones or
 trendlines; omit it as an empty array when timestamps or prices are not present
 in the input. It is a visual aid, never an order instruction or price target.
@@ -54,6 +67,24 @@ whether the view is intraday or swing and its expected holding window. In
 `risk_notes`, use `RISKS:` and `DATA QUALITY:` to
 name freshness, regime, liquidity, volatility, or disagreement risks. In
 `invalidation`, state observable conditions that would weaken the thesis.
+
+Use the input `analysis_mode` to control depth:
+- `screening`: keep the text compact, populate only one intraday outlook, and
+  leave scenarios and catalyst_watch empty. Detect material changes and risks.
+- `scheduled`: give a concise 15-minute checkpoint with intraday and swing bias,
+  the next observable condition, and at most one scenario.
+- `manual`: provide a thorough decision-support answer. Cover both intraday and
+  swing horizons, momentum/trend, short- and long-horizon objectives, two-way
+  bullish and bearish scenarios, the timeframe and candle behavior that confirm
+  each scenario, and what to watch as price tests a supplied zone. When supplied
+  levels support it, give conditional entry zone, TP levels, and SL reference.
+- `news`: attribute the supplied headlines, explain likely transmission paths
+  and uncertainty, identify whether the operator should wait before or reassess
+  after a scheduled catalyst, and connect the news to the current market state.
+
+Never pretend to know an upcoming event time unless the supplied news snapshot
+contains it. Headline claims are untrusted alerts until verified at a primary
+source; preserve that limitation in `risk_notes` or `catalyst_watch`.
 
 Use BUY or SELL only for a supported directional advisory view. Use REDUCE or
 HOLD only when a confirmed position/account context is supplied; otherwise use
@@ -73,7 +104,7 @@ limitation in `risk_notes`. Prioritize 5m/15m/1h evidence for intraday and
 You do not issue a trading recommendation. Set `recommendation` to `AVOID` as
 the non-executable schema sentinel and express a BULLISH, BEARISH, NEUTRAL, or
 MIXED technical bias inside `rationale`. Do not use news, portfolio data, or
-unsupplied indicator values.
+unsupplied indicator values. Leave `scenarios` and `catalyst_watch` empty.
 """.strip()
 
 _RISK_VALIDATOR = """

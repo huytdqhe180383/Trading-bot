@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Callable, Iterable
 
 from config import (
-    ANALYST_BACKGROUND_ANALYSIS_CADENCE,
-    ANALYST_SCAN_INTERVAL_SECS,
     ANALYST_SIGNIFICANT_CONFIDENCE,
+    ANALYST_STRONG_ANALYSIS_CADENCE,
+    ANALYST_WEAK_SCREEN_INTERVAL_SECS,
     SYMBOLS,
 )
 
-from .market import fetch_public_snapshot
+from .market import fetch_public_snapshot, fetch_screening_snapshot
 from .discord_bot import DiscordNotifier, load_discord_config_from_env
 from .service import AnalystService, create_default_analyst_service
 
@@ -23,37 +24,77 @@ from .service import AnalystService, create_default_analyst_service
 class AnalystScanner:
     service: AnalystService
     symbols: Iterable[str] = field(default_factory=lambda: tuple(SYMBOLS))
-    scan_interval_secs: int = ANALYST_SCAN_INTERVAL_SECS
-    background_analysis_cadence: str = ANALYST_BACKGROUND_ANALYSIS_CADENCE
+    scan_interval_secs: int = ANALYST_WEAK_SCREEN_INTERVAL_SECS
+    background_analysis_cadence: str = ANALYST_STRONG_ANALYSIS_CADENCE
     notifier: DiscordNotifier | None = None
     _last_analysis_key: str = ""
+    last_screening_completed_at: str = ""
+    last_screening_results: list[dict] = field(default_factory=list)
+    screening_stage_by_symbol: dict[str, str] = field(default_factory=dict)
+    last_scheduled_completed_at: str = ""
+    last_scheduled_results: list[dict] = field(default_factory=list)
 
     def run_once(self) -> list[dict]:
-        events = []
+        events = self.run_screening_once()
         analysis_key = _cadence_key(datetime.now(timezone.utc), self.background_analysis_cadence)
         run_scheduled_analysis = analysis_key != self._last_analysis_key
-        for symbol in self.symbols:
-            snapshot = fetch_public_snapshot(symbol)
-            risk_event = _risk_trigger(snapshot)
-            if risk_event:
-                event = self.service.run_update(
-                    symbol=symbol,
-                    market_snapshot={**snapshot, "trigger": risk_event},
-                    scope="background",
-                )
-                self._notify_if_significant(event, trigger=risk_event)
-                events.append(event.to_public_dict())
-            elif run_scheduled_analysis:
-                event = self.service.run_update(
-                    symbol=symbol,
-                    market_snapshot=snapshot,
-                    scope="interactive",
-                )
-                self._notify_if_significant(event)
-                events.append(event.to_public_dict())
         if run_scheduled_analysis:
+            events.extend(self.run_scheduled_once())
             self._last_analysis_key = analysis_key
         return events
+
+    def run_screening_once(self) -> list[dict]:
+        results = self._run_parallel(self._screen_symbol)
+        self.last_screening_results = results
+        self.last_screening_completed_at = datetime.now(timezone.utc).isoformat()
+        return results
+
+    def run_scheduled_once(self) -> list[dict]:
+        results = self._run_parallel(self._analyze_symbol)
+        self.last_scheduled_results = results
+        self.last_scheduled_completed_at = datetime.now(timezone.utc).isoformat()
+        return results
+
+    def _run_parallel(self, worker: Callable[[str], dict]) -> list[dict]:
+        symbols = tuple(self.symbols)
+        if not symbols:
+            return []
+        with ThreadPoolExecutor(max_workers=len(symbols), thread_name_prefix="analyst") as executor:
+            return list(executor.map(worker, symbols))
+
+    def _screen_symbol(self, symbol: str) -> dict:
+        try:
+            self.screening_stage_by_symbol[symbol] = "fetching_market"
+            snapshot = fetch_screening_snapshot(symbol)
+            risk_event = _risk_trigger(snapshot)
+            self.screening_stage_by_symbol[symbol] = "calling_weak_llm"
+            event = self.service.run_update(
+                symbol=symbol,
+                market_snapshot={**snapshot, "trigger": risk_event} if risk_event else snapshot,
+                scope="screening",
+                analysis_mode="screening",
+            )
+            if risk_event:
+                self._notify_if_significant(event, trigger=risk_event)
+            self.screening_stage_by_symbol[symbol] = "completed"
+            return event.to_public_dict()
+        except Exception as exc:
+            self.screening_stage_by_symbol[symbol] = f"error:{type(exc).__name__}"
+            return {"status": "error", "symbol": symbol, "stage": "screening", "error": str(exc)}
+
+    def _analyze_symbol(self, symbol: str) -> dict:
+        try:
+            snapshot = fetch_public_snapshot(symbol)
+            event = self.service.run_update(
+                symbol=symbol,
+                market_snapshot=snapshot,
+                scope="scheduled",
+                analysis_mode="scheduled",
+            )
+            self._notify_if_significant(event)
+            return event.to_public_dict()
+        except Exception as exc:
+            return {"status": "error", "symbol": symbol, "stage": "scheduled", "error": str(exc)}
 
     def run_forever(self, *, max_cycles: int = 0) -> None:
         cycle = 0
@@ -73,9 +114,12 @@ class AnalystScanner:
             return
 
 
-def create_default_scanner() -> AnalystScanner:
+def create_default_scanner(*, service: AnalystService | None = None) -> AnalystScanner:
     notifier = DiscordNotifier(config=load_discord_config_from_env())
-    return AnalystScanner(service=create_default_analyst_service(), notifier=notifier if notifier.enabled() else None)
+    return AnalystScanner(
+        service=service or create_default_analyst_service(),
+        notifier=notifier if notifier.enabled() else None,
+    )
 
 
 def _risk_trigger(snapshot: dict) -> str:
@@ -94,7 +138,7 @@ def _is_significant(event: object, *, trigger: str = "") -> bool:
     recommendation = str(getattr(event, "recommendation", "")).upper()
     confidence = getattr(event, "confidence", None)
     try:
-        return recommendation in {"BUY", "SELL", "REDUCE", "AVOID"} and float(confidence) >= ANALYST_SIGNIFICANT_CONFIDENCE
+        return recommendation in {"BUY", "SELL", "REDUCE"} and float(confidence) >= ANALYST_SIGNIFICANT_CONFIDENCE
     except (TypeError, ValueError):
         return False
 

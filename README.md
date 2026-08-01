@@ -61,6 +61,11 @@ python scripts/run_analyst_discord.py
 python scripts/run_ui.py
 ```
 
+When `ANALYST_ENABLED=true`, `scripts/run_ui.py` also starts the weak 15-second
+screening loop and the strong 15-minute scheduled analysis loop. Run
+`scripts/run_analyst.py` only for a standalone/headless scanner; do not launch
+both against the same operational database.
+
 ## Storage Model
 
 - `data/raw/` and `data/processed/`: local market data.
