@@ -62,6 +62,18 @@ class AnalystServiceTest(unittest.TestCase):
             events = service.events()
             self.assertEqual(len(events), 1)
 
+    def test_update_fetches_public_market_snapshot_when_ui_does_not_supply_one(self):
+        with TemporaryDirectory() as tmp_name:
+            tmp = type("Tmp", (), {"name": tmp_name})
+            llm = _FakeLLM()
+            service = self._service(tmp, llm=llm)
+
+            with patch("tradingbot.analyst.service.fetch_public_snapshot", return_value={"source": "okx_public", "one_hour": {"available": True}}):
+                event = service.run_update(symbol="BTCUSDT")
+
+            self.assertEqual(event.status, "ok")
+            self.assertEqual(event.payload["market_snapshot"]["source"], "okx_public")
+
     def test_provider_error_records_error_without_fallback_recommendation(self):
         with TemporaryDirectory() as tmp_name:
             tmp = type("Tmp", (), {"name": tmp_name})

@@ -101,9 +101,10 @@ class AnalystService:
         scope: str = "interactive",
     ) -> AnalystEvent:
         normalized_symbol = _normalize_symbol(symbol)
+        resolved_snapshot = market_snapshot if market_snapshot is not None else _safe_public_snapshot(normalized_symbol)
         prompt_payload = {
             "symbol": normalized_symbol,
-            "market_snapshot": market_snapshot or {"status": "snapshot_unavailable"},
+            "market_snapshot": resolved_snapshot,
             "task": (
                 "Return strict JSON with recommendation, confidence, rationale, risk_notes, invalidation. "
                 "Use only BUY, SELL, REDUCE, HOLD, or AVOID. Do not include quantities, leverage, "
