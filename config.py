@@ -300,9 +300,18 @@ ORDER_SUGGESTION_TTL_SECS = _env_int("ORDER_SUGGESTION_TTL_SECS", 900)
 ENABLE_KRONOS = False
 ENABLE_TRADINGAGENTS = False
 
-KRONOS_MODEL_ID = "NeoQuasar/Kronos-mini"
-KRONOS_TOKENIZER_ID = "NeoQuasar/Kronos-Tokenizer-2k"
-KRONOS_FORECAST_HORIZON = 1
+# The current public Kronos release exposes mini, small, and base checkpoints.
+# Use the paper's largest public checkpoint by default; live use remains disabled
+# until it passes the project's out-of-sample promotion gates.
+KRONOS_MODEL_ID = _env_str("KRONOS_MODEL_ID", "NeoQuasar/Kronos-base")
+KRONOS_TOKENIZER_ID = _env_str("KRONOS_TOKENIZER_ID", "NeoQuasar/Kronos-Tokenizer-base")
+KRONOS_UPSTREAM_REVISION = _env_str(
+    "KRONOS_UPSTREAM_REVISION", "67b630e67f6a18c9e9be918d9b4337c960db1e9a"
+)
+KRONOS_FORECAST_HORIZON = _env_int("KRONOS_FORECAST_HORIZON", 1)
+KRONOS_SAMPLE_COUNT = _env_int("KRONOS_SAMPLE_COUNT", 5)
+KRONOS_SAMPLING_TEMPERATURE = _env_float("KRONOS_SAMPLING_TEMPERATURE", 1.0)
+KRONOS_TOP_P = _env_float("KRONOS_TOP_P", 0.9)
 
 TRADINGAGENTS_PROVIDER = "ollama"
 TRADINGAGENTS_PROVIDER_FALLBACKS = ["ollama"]

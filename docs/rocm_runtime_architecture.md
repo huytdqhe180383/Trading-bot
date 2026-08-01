@@ -1,6 +1,6 @@
 # ROCm Runtime Architecture And Usage
 
-Last updated: 2026-05-24
+Last updated: 2026-08-01
 
 This document explains how this repository uses the local AMD ROCm stack for
 PPO/SAC inference/training and Kronos GPU forecasting. It is a repo-specific
@@ -67,8 +67,15 @@ Kronos is source-based and must be available locally:
 
 ```powershell
 git clone https://github.com/shiyu-coder/Kronos.git external/Kronos
+git -C external/Kronos checkout 67b630e67f6a18c9e9be918d9b4337c960db1e9a
 $env:KRONOS_REPO_PATH = (Resolve-Path .\external\Kronos).Path
 ```
+
+The repository revision above is the verified upstream `master` revision from
+2026-08-01. It matches the current project defaults: the public
+`NeoQuasar/Kronos-base` checkpoint and `NeoQuasar/Kronos-Tokenizer-base`.
+Record a new revision in `KRONOS_UPSTREAM_REVISION` when intentionally updating
+the external clone; do not silently change it during a backtest or live run.
 
 If you open a new PowerShell session, set `KRONOS_REPO_PATH` again before a
 Kronos run. Without it, `KronosAdapter` cannot import `model.Kronos`,
@@ -145,7 +152,7 @@ Run full fusion, including TradingAgents if enabled:
 For a successful native Kronos GPU run, logs should contain a line like:
 
 ```text
-Kronos backend initialized (NeoQuasar/Kronos-mini) on cuda:0.
+Kronos backend initialized (NeoQuasar/Kronos-base) on cuda:0.
 ```
 
 Episode diagnostics should show:

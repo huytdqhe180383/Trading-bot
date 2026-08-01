@@ -36,7 +36,11 @@ from config import (
     INITIAL_CAPITAL,
     KRONOS_FORECAST_HORIZON,
     KRONOS_MODEL_ID,
+    KRONOS_SAMPLE_COUNT,
+    KRONOS_SAMPLING_TEMPERATURE,
     KRONOS_TOKENIZER_ID,
+    KRONOS_TOP_P,
+    KRONOS_UPSTREAM_REVISION,
     LLM_RISK_GATE_CACHE_TTL,
     LLM_RISK_GATE_CADENCE,
     LLM_RISK_GATE_DECISION_LOG_PATH,
@@ -1400,7 +1404,11 @@ def run_backtest(
             enabled=True,
             model_id=KRONOS_MODEL_ID,
             tokenizer_id=KRONOS_TOKENIZER_ID,
+            upstream_revision=KRONOS_UPSTREAM_REVISION,
             forecast_horizon=KRONOS_FORECAST_HORIZON,
+            sample_count=KRONOS_SAMPLE_COUNT,
+            sampling_temperature=KRONOS_SAMPLING_TEMPERATURE,
+            top_p=KRONOS_TOP_P,
         )
     if pipe_flags.get("tradingagents"):
         ta_adapter = TradingAgentsAdapter(

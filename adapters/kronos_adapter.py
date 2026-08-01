@@ -42,17 +42,25 @@ class KronosAdapter:
         self,
         *,
         enabled: bool = True,
-        model_id: str = "NeoQuasar/Kronos-mini",
-        tokenizer_id: str = "NeoQuasar/Kronos-Tokenizer-2k",
+        model_id: str = "NeoQuasar/Kronos-base",
+        tokenizer_id: str = "NeoQuasar/Kronos-Tokenizer-base",
+        upstream_revision: str = "",
         forecast_horizon: int = 1,
         max_context: int = 512,
+        sample_count: int = 5,
+        sampling_temperature: float = 1.0,
+        top_p: float = 0.9,
         device: str | None = None,
     ):
         self.enabled = enabled
         self.model_id = model_id
         self.tokenizer_id = tokenizer_id
+        self.upstream_revision = str(upstream_revision).strip()
         self.forecast_horizon = max(1, int(forecast_horizon))
         self.max_context = max(64, int(max_context))
+        self.sample_count = max(1, int(sample_count))
+        self.sampling_temperature = max(1e-6, float(sampling_temperature))
+        self.top_p = float(np.clip(float(top_p), 1e-6, 1.0))
         self.device = device
 
         self._predictor: Any | None = None
@@ -194,9 +202,9 @@ class KronosAdapter:
             x_timestamp=x_timestamp,
             y_timestamp=y_timestamp,
             pred_len=self.forecast_horizon,
-            T=1.0,
-            top_p=0.9,
-            sample_count=1,
+            T=self.sampling_temperature,
+            top_p=self.top_p,
+            sample_count=self.sample_count,
             verbose=False,
         )
 
@@ -215,7 +223,16 @@ class KronosAdapter:
             confidence=confidence,
             directional_score=directional,
             source="kronos",
-            details={"backend": self._backend_name, "hist_vol": hist_vol},
+            details={
+                "backend": self._backend_name,
+                "hist_vol": hist_vol,
+                "model_id": self.model_id,
+                "tokenizer_id": self.tokenizer_id,
+                "upstream_revision": self.upstream_revision,
+                "sample_count": self.sample_count,
+                "sampling_temperature": self.sampling_temperature,
+                "top_p": self.top_p,
+            },
         )
 
     @staticmethod

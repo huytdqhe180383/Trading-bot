@@ -46,6 +46,12 @@ metrics/        performance calculations
 - `ollama/`: local model profile.
 - `scripts/server/`: systemd, monitoring, and Tailscale helpers.
 
+## Agent Prompt Authoring
+
+Use [Agent prompt briefs](../architecture/agent_prompt_briefs.md) before
+editing an LLM system prompt. It defines each role's evidence boundary,
+required output, and non-negotiable execution limits.
+
 ## Generated And Local-Only Data
 
 - `data/raw/`, `data/processed/`, `models/`, `logs/`, and `results/` are ignored.

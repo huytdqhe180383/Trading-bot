@@ -29,7 +29,11 @@ from config import (
     ENSEMBLE_METHOD,
     KRONOS_FORECAST_HORIZON,
     KRONOS_MODEL_ID,
+    KRONOS_SAMPLE_COUNT,
+    KRONOS_SAMPLING_TEMPERATURE,
     KRONOS_TOKENIZER_ID,
+    KRONOS_TOP_P,
+    KRONOS_UPSTREAM_REVISION,
     LIVE_BASELINE_MODEL_DIR,
     LIVE_KILL_SWITCH_MAX_TURNOVER,
     LIVE_MAX_DATA_STALENESS_SECS,
@@ -556,7 +560,11 @@ def main() -> None:
         enabled=args.enable_kronos,
         model_id=KRONOS_MODEL_ID,
         tokenizer_id=KRONOS_TOKENIZER_ID,
+        upstream_revision=KRONOS_UPSTREAM_REVISION,
         forecast_horizon=KRONOS_FORECAST_HORIZON,
+        sample_count=KRONOS_SAMPLE_COUNT,
+        sampling_temperature=KRONOS_SAMPLING_TEMPERATURE,
+        top_p=KRONOS_TOP_P,
     )
     ta_adapter = TradingAgentsAdapter(
         enabled=args.enable_ta,

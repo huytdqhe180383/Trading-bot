@@ -32,8 +32,10 @@ class KronosAdapterTest(unittest.TestCase):
             def __init__(self):
                 self.x_timestamp = None
                 self.y_timestamp = None
+                self.kwargs = None
 
             def predict(self, **kwargs):
+                self.kwargs = kwargs
                 self.x_timestamp = kwargs["x_timestamp"]
                 self.y_timestamp = kwargs["y_timestamp"]
                 return pd.DataFrame({"close": [106.0]})
@@ -62,6 +64,13 @@ class KronosAdapterTest(unittest.TestCase):
         self.assertIsInstance(predictor.y_timestamp, pd.Series)
         self.assertTrue(hasattr(predictor.x_timestamp, "dt"))
         self.assertTrue(hasattr(predictor.y_timestamp, "dt"))
+        self.assertEqual(predictor.kwargs["sample_count"], 5)
+        self.assertEqual(predictor.kwargs["T"], 1.0)
+        self.assertEqual(predictor.kwargs["top_p"], 0.9)
+        self.assertEqual(signal.details["sample_count"], 5)
+        self.assertEqual(signal.details["sampling_temperature"], 1.0)
+        self.assertEqual(signal.details["top_p"], 0.9)
+        self.assertEqual(signal.details["upstream_revision"], "")
 
 
 if __name__ == "__main__":
