@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterable
 
-from config import ANALYST_BACKGROUND_ANALYSIS_CADENCE, ANALYST_SCAN_INTERVAL_SECS, SYMBOLS
+from config import (
+    ANALYST_BACKGROUND_ANALYSIS_CADENCE,
+    ANALYST_SCAN_INTERVAL_SECS,
+    ANALYST_SIGNIFICANT_CONFIDENCE,
+    SYMBOLS,
+)
 
 from .market import fetch_public_snapshot
 from .discord_bot import DiscordNotifier, load_discord_config_from_env
@@ -36,15 +41,15 @@ class AnalystScanner:
                     market_snapshot={**snapshot, "trigger": risk_event},
                     scope="background",
                 )
-                self._notify(event)
+                self._notify_if_significant(event, trigger=risk_event)
                 events.append(event.to_public_dict())
             elif run_scheduled_analysis:
                 event = self.service.run_update(
                     symbol=symbol,
                     market_snapshot=snapshot,
-                    scope="background",
+                    scope="interactive",
                 )
-                self._notify(event)
+                self._notify_if_significant(event)
                 events.append(event.to_public_dict())
         if run_scheduled_analysis:
             self._last_analysis_key = analysis_key
@@ -59,8 +64,8 @@ class AnalystScanner:
                 return
             time.sleep(max(1, int(self.scan_interval_secs)))
 
-    def _notify(self, event: object) -> None:
-        if self.notifier is None:
+    def _notify_if_significant(self, event: object, *, trigger: str = "") -> None:
+        if self.notifier is None or not _is_significant(event, trigger=trigger):
             return
         try:
             self.notifier.send_event(event)
@@ -81,6 +86,17 @@ def _risk_trigger(snapshot: dict) -> str:
     if float(one_hour.get("window_return_pct", 0.0)) <= -3.0:
         return "1h_drop"
     return ""
+
+
+def _is_significant(event: object, *, trigger: str = "") -> bool:
+    if trigger:
+        return True
+    recommendation = str(getattr(event, "recommendation", "")).upper()
+    confidence = getattr(event, "confidence", None)
+    try:
+        return recommendation in {"BUY", "SELL", "REDUCE", "AVOID"} and float(confidence) >= ANALYST_SIGNIFICANT_CONFIDENCE
+    except (TypeError, ValueError):
+        return False
 
 
 def _cadence_key(now: datetime, cadence: str) -> str:

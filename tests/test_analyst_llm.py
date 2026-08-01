@@ -134,6 +134,40 @@ class AnalystLLMTest(unittest.TestCase):
         with self.assertRaises(AnalystValidationError):
             validate_analyst_payload({"recommendation": "OPEN_LONG", "rationale": "bad shape"})
 
+    def test_chart_annotations_are_preserved_without_order_fields(self):
+        parsed = validate_analyst_payload(
+            {
+                "recommendation": "BUY",
+                "confidence": 0.7,
+                "rationale": "Price is holding a supplied support zone.",
+                "risk_notes": "Trendline depends on current volatility.",
+                "invalidation": "A close below the displayed support weakens the thesis.",
+                "chart_annotations": [
+                    {"kind": "support", "price": 100000, "label": "Observed support"},
+                    {
+                        "kind": "trend",
+                        "start_time": "2026-08-01T00:00:00Z",
+                        "start_price": 99000,
+                        "end_time": "2026-08-01T01:00:00Z",
+                        "end_price": 100000,
+                        "label": "Higher-low trend",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(len(parsed["chart_annotations"]), 2)
+
+    def test_chart_annotation_requires_valid_price(self):
+        with self.assertRaises(AnalystValidationError):
+            validate_analyst_payload(
+                {
+                    "recommendation": "HOLD",
+                    "rationale": "No decisive edge.",
+                    "chart_annotations": [{"kind": "support", "price": 0, "label": "Invalid"}],
+                }
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

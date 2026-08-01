@@ -40,4 +40,9 @@ export type AnalystBudget = {
   interactive_limit: number;
 };
 
+export type ChartAnnotation =
+  | { kind: "support"; price: number; label: string }
+  | { kind: "resistance"; price: number; label: string }
+  | { kind: "trend"; start_time: string; start_price: number; end_time: string; end_price: number; label: string };
+
 export type IndicatorKey = "sma20" | "ema50";

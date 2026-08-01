@@ -323,6 +323,7 @@ class AnalystService:
                 "llm_scope": normalized_scope,
                 "llm_model": getattr(llm_client, "model", ""),
                 "prompt_version": ANALYST_PROMPT_VERSION,
+                "chart_annotations": parsed["chart_annotations"],
             },
         )
         return self.store.append(event)
@@ -357,6 +358,7 @@ class AnalystService:
                         "rationale": parsed["rationale"],
                         "risk_notes": parsed["risk_notes"],
                         "invalidation": parsed["invalidation"],
+                        "chart_annotations": parsed["chart_annotations"],
                         "llm_model": getattr(self.background_llm_client, "model", ""),
                         "prompt_version": ANALYST_PROMPT_VERSION,
                     }

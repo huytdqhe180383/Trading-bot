@@ -103,6 +103,7 @@ def validate_analyst_payload(raw: dict[str, Any]) -> dict[str, Any]:
             confidence = confidence / 100.0
         if confidence < 0.0 or confidence > 1.0:
             raise AnalystValidationError("confidence must be between 0 and 1.")
+    chart_annotations = _validate_chart_annotations(raw.get("chart_annotations", []))
 
     return {
         "recommendation": recommendation,
@@ -110,7 +111,55 @@ def validate_analyst_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "rationale": str(raw.get("rationale", "")).strip(),
         "risk_notes": str(raw.get("risk_notes", "")).strip(),
         "invalidation": str(raw.get("invalidation", "")).strip(),
+        "chart_annotations": chart_annotations,
     }
+
+
+def _validate_chart_annotations(raw: Any) -> list[dict[str, Any]]:
+    """Accept a small non-executable annotation set for the public chart."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 6:
+        raise AnalystValidationError("chart_annotations must be a list with at most six entries.")
+    validated: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise AnalystValidationError("Each chart annotation must be an object.")
+        kind = str(item.get("kind", "")).strip().lower()
+        label = str(item.get("label", "")).strip()[:80]
+        if kind not in {"support", "resistance", "trend"} or not label:
+            raise AnalystValidationError("Chart annotations need a supported kind and label.")
+        if kind in {"support", "resistance"}:
+            price = _positive_finite_number(item.get("price"), field="chart annotation price")
+            validated.append({"kind": kind, "price": price, "label": label})
+            continue
+        start_price = _positive_finite_number(item.get("start_price"), field="trend start_price")
+        end_price = _positive_finite_number(item.get("end_price"), field="trend end_price")
+        start_time = str(item.get("start_time", "")).strip()
+        end_time = str(item.get("end_time", "")).strip()
+        if not start_time or not end_time:
+            raise AnalystValidationError("Trend annotations require start_time and end_time.")
+        validated.append(
+            {
+                "kind": kind,
+                "label": label,
+                "start_price": start_price,
+                "end_price": end_price,
+                "start_time": start_time,
+                "end_time": end_time,
+            }
+        )
+    return validated
+
+
+def _positive_finite_number(value: Any, *, field: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise AnalystValidationError(f"{field} must be numeric.") from exc
+    if number <= 0.0 or number == float("inf") or number != number:
+        raise AnalystValidationError(f"{field} must be a positive finite number.")
+    return number
 
 
 def _find_forbidden_key(value: Any) -> str | None:

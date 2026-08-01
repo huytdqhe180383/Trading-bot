@@ -20,7 +20,7 @@ import {
 } from "lightweight-charts";
 import { fetchAnalystSignals, fetchCandles } from "@/lib/api";
 import { calculateSupportResistance } from "@/lib/chartAnalysis";
-import type { AnalystEvent, Candle } from "@/lib/types";
+import type { AnalystEvent, Candle, ChartAnnotation } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
 
 type ChartPanelProps = {
@@ -51,7 +51,9 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
   const markerApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const indicatorSeriesRef = useRef<ISeriesApi<"Line", Time>[]>([]);
   const drawingSeriesRef = useRef<ISeriesApi<"Line", Time>[]>([]);
+  const agentAnnotationSeriesRef = useRef<ISeriesApi<"Line", Time>[]>([]);
   const supportResistanceLinesRef = useRef<IPriceLine[]>([]);
+  const agentAnnotationPriceLinesRef = useRef<IPriceLine[]>([]);
   const pendingPointRef = useRef<DrawingPoint | null>(null);
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,7 +127,9 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
       markerApiRef.current = null;
       indicatorSeriesRef.current = [];
       drawingSeriesRef.current = [];
+      agentAnnotationSeriesRef.current = [];
       supportResistanceLinesRef.current = [];
+      agentAnnotationPriceLinesRef.current = [];
       pendingPointRef.current = null;
     };
   }, []);
@@ -210,6 +214,47 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
   useEffect(() => {
     markerApiRef.current?.setMarkers(markers);
   }, [markers]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const candleSeries = candleSeriesRef.current;
+    if (!chart || !candleSeries || candles.length === 0) return;
+
+    agentAnnotationSeriesRef.current.forEach((series) => chart.removeSeries(series));
+    agentAnnotationSeriesRef.current = [];
+    agentAnnotationPriceLinesRef.current.forEach((line) => candleSeries.removePriceLine(line));
+    agentAnnotationPriceLinesRef.current = [];
+
+    for (const annotation of events.flatMap(eventAnnotations)) {
+      if (annotation.kind === "support" || annotation.kind === "resistance") {
+        agentAnnotationPriceLinesRef.current.push(
+          candleSeries.createPriceLine({
+            price: annotation.price,
+            color: annotation.kind === "support" ? "#22c55e" : "#ef4444",
+            lineWidth: 2,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: `Agent ${annotation.kind}: ${annotation.label}`,
+          }),
+        );
+        continue;
+      }
+      const startTime = toChartTime(annotation.start_time, candles);
+      const endTime = toChartTime(annotation.end_time, candles);
+      if (startTime === null || endTime === null) continue;
+      const series = chart.addSeries(LineSeries, {
+        color: "#a78bfa",
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      series.setData([
+        { time: startTime, value: annotation.start_price },
+        { time: endTime, value: annotation.end_price },
+      ]);
+      agentAnnotationSeriesRef.current.push(series);
+    }
+  }, [candles, events]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -298,6 +343,14 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
       supportResistanceLinesRef.current.forEach((line) => candleSeries.removePriceLine(line));
     }
     supportResistanceLinesRef.current = [];
+    if (candleSeries) {
+      agentAnnotationPriceLinesRef.current.forEach((line) => candleSeries.removePriceLine(line));
+    }
+    agentAnnotationPriceLinesRef.current = [];
+    if (chart) {
+      agentAnnotationSeriesRef.current.forEach((series) => chart.removeSeries(series));
+    }
+    agentAnnotationSeriesRef.current = [];
     pendingPointRef.current = null;
   };
 
@@ -336,6 +389,33 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
       )}
     </div>
   );
+}
+
+function eventAnnotations(event: AnalystEvent): ChartAnnotation[] {
+  const raw = event.payload?.chart_annotations;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isChartAnnotation);
+}
+
+function isChartAnnotation(value: unknown): value is ChartAnnotation {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  const kind = item.kind;
+  if ((kind === "support" || kind === "resistance") && typeof item.price === "number" && typeof item.label === "string") return true;
+  return (
+    kind === "trend" &&
+    typeof item.start_time === "string" &&
+    typeof item.end_time === "string" &&
+    typeof item.start_price === "number" &&
+    typeof item.end_price === "number" &&
+    typeof item.label === "string"
+  );
+}
+
+function toChartTime(value: string, candles: Candle[]): UTCTimestamp | null {
+  const timestamp = Math.floor(new Date(value).getTime() / 1000);
+  if (!Number.isFinite(timestamp)) return null;
+  return nearestTime(timestamp, candles.map((candle) => candle.time)) as UTCTimestamp;
 }
 
 function buildMarkers(events: AnalystEvent[], candles: Candle[]): SeriesMarker<Time>[] {
