@@ -296,6 +296,11 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  transition: width 180ms ease, max-height 180ms ease;
+}
+
+.sidebar.expanded {
+  width: min(720px, 55vw);
 }
 
 .sidebar-header {
@@ -308,6 +313,20 @@ button {
   font-size: 14px;
   letter-spacing: 0.13em;
   text-transform: uppercase;
+}
+
+.sidebar-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sidebar-expand-button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex: 0 0 auto;
 }
 
 .sidebar-header p {
@@ -512,5 +531,10 @@ button {
     max-height: 42vh;
     border-left: 0;
     border-top: 1px solid var(--border);
+  }
+
+  .sidebar.expanded {
+    width: 100%;
+    max-height: 75vh;
   }
 }

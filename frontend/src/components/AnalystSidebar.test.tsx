@@ -93,4 +93,14 @@ describe("AnalystSidebar", () => {
     expect(screen.queryByRole("button", { name: /explain/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /validate/i })).not.toBeInTheDocument();
   });
+
+  it("expands and collapses the chat panel", () => {
+    const { container } = render(<AnalystSidebar busy={false} setBusy={vi.fn()} setError={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand chat" }));
+    expect(container.querySelector(".sidebar")).toHaveClass("expanded");
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse chat" }));
+    expect(container.querySelector(".sidebar")).not.toHaveClass("expanded");
+  });
 });

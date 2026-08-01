@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { calculateSupportResistance, parseSupportResistanceInterval, wantsSupportResistance } from "./chartAnalysis";
-import type { Candle } from "./types";
+import {
+  calculateSupportResistance,
+  parseSupportResistanceInterval,
+  selectVisibleChartAnnotations,
+  wantsSupportResistance,
+} from "./chartAnalysis";
+import type { AnalystEvent, Candle, ChartAnnotation } from "./types";
 
 function candle(index: number, low: number, high: number, close = (low + high) / 2): Candle {
   return {
@@ -45,4 +50,45 @@ describe("chartAnalysis", () => {
     expect(lines.some((line) => line.kind === "support")).toBe(true);
     expect(lines.some((line) => line.kind === "resistance")).toBe(true);
   });
+
+  it("shows only the latest relevant annotation set and merges nearby price levels", () => {
+    const events = [
+      analystEvent("old", "2026-08-02T00:00:00Z", [
+        { kind: "support", price: 90, label: "Old support" },
+        { kind: "resistance", price: 120, label: "Old resistance" },
+      ]),
+      analystEvent("latest", "2026-08-02T00:15:00Z", [
+        { kind: "support", price: 100, label: "Current support" },
+        { kind: "support", price: 100.1, label: "Duplicate current support" },
+        { kind: "resistance", price: 110, label: "Current resistance" },
+      ]),
+      analystEvent("other-symbol", "2026-08-02T00:30:00Z", [
+        { kind: "support", price: 80, label: "ETH support" },
+      ], "ETHUSDT"),
+    ];
+
+    expect(selectVisibleChartAnnotations(events, "BTCUSDT")).toEqual([
+      { kind: "support", price: 100, label: "Current support" },
+      { kind: "resistance", price: 110, label: "Current resistance" },
+    ]);
+  });
 });
+
+function analystEvent(
+  id: string,
+  createdAt: string,
+  annotations: ChartAnnotation[],
+  symbol = "BTCUSDT",
+): AnalystEvent {
+  return {
+    id,
+    event_type: "analysis",
+    status: "ok",
+    title: "Analysis",
+    message: "Analysis",
+    symbol,
+    role: "main_analyst",
+    created_at_utc: createdAt,
+    payload: { chart_annotations: annotations },
+  };
+}

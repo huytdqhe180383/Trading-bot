@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Newspaper, Send } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Maximize2, Minimize2, Newspaper, Send } from "lucide-react";
 import {
   WS_URL,
   askAnalyst,
@@ -37,6 +37,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
   const [userMessages, setUserMessages] = useState<UserChatMessage[]>([]);
   const [newsEvent, setNewsEvent] = useState<AnalystEvent | null>(null);
   const [newsOpen, setNewsOpen] = useState(false);
+  const [chatExpanded, setChatExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const { symbol, events, upsertEvent, setSelectedEventId, requestSupportResistance } = useTradingStore();
 
@@ -131,9 +132,20 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
   };
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${chatExpanded ? "expanded" : ""}`}>
       <div className="sidebar-header">
-        <h2>Analyst chat</h2>
+        <div className="sidebar-title-row">
+          <h2>Analyst chat</h2>
+          <button
+            aria-label={chatExpanded ? "Collapse chat" : "Expand chat"}
+            className="button ghost sidebar-expand-button"
+            onClick={() => setChatExpanded((expanded) => !expanded)}
+            title={chatExpanded ? "Collapse chat" : "Expand chat"}
+            type="button"
+          >
+            {chatExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+        </div>
         <p>
           Strong manual analysis covers intraday and swing horizons, momentum, two-way scenarios, and conditional
           planning levels. It remains advisory and cannot execute an order.

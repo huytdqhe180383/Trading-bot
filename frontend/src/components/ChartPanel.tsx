@@ -19,8 +19,8 @@ import {
   UTCTimestamp,
 } from "lightweight-charts";
 import { fetchAnalystSignals, fetchCandles } from "@/lib/api";
-import { calculateSupportResistance } from "@/lib/chartAnalysis";
-import type { AnalystEvent, Candle, ChartAnnotation } from "@/lib/types";
+import { calculateSupportResistance, selectVisibleChartAnnotations } from "@/lib/chartAnalysis";
+import type { AnalystEvent, Candle } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
 
 type ChartPanelProps = {
@@ -225,16 +225,16 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
     agentAnnotationPriceLinesRef.current.forEach((line) => candleSeries.removePriceLine(line));
     agentAnnotationPriceLinesRef.current = [];
 
-    for (const annotation of events.flatMap(eventAnnotations)) {
+    for (const annotation of selectVisibleChartAnnotations(events, symbol)) {
       if (annotation.kind === "support" || annotation.kind === "resistance") {
         agentAnnotationPriceLinesRef.current.push(
           candleSeries.createPriceLine({
             price: annotation.price,
             color: annotation.kind === "support" ? "#22c55e" : "#ef4444",
-            lineWidth: 2,
-            lineStyle: LineStyle.Dashed,
-            axisLabelVisible: true,
-            title: `Agent ${annotation.kind}: ${annotation.label}`,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: false,
+            title: "",
           }),
         );
         continue;
@@ -254,7 +254,7 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
       ]);
       agentAnnotationSeriesRef.current.push(series);
     }
-  }, [candles, events]);
+  }, [candles, events, symbol]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -324,7 +324,7 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
             ? candles
             : await fetchCandles(supportResistanceRequest.symbol, supportResistanceRequest.interval, 500);
         if (cancelled) return;
-        drawSupportResistanceLines(rows, supportResistanceRequest.interval);
+        drawSupportResistanceLines(rows);
       } catch (error) {
         if (!cancelled) setError(error instanceof Error ? error.message : "Failed to draw support/resistance lines.");
       }
@@ -358,7 +358,7 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
     pendingPointRef.current = null;
   };
 
-  const drawSupportResistanceLines = (rows: Candle[], sourceInterval: string) => {
+  const drawSupportResistanceLines = (rows: Candle[]) => {
     const candleSeries = candleSeriesRef.current;
     if (!candleSeries) return;
     supportResistanceLinesRef.current.forEach((line) => candleSeries.removePriceLine(line));
@@ -366,10 +366,10 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
       candleSeries.createPriceLine({
         price: line.price,
         color: line.kind === "support" ? "#10b981" : "#ef4444",
-        lineWidth: 2,
-        lineStyle: LineStyle.LargeDashed,
-        axisLabelVisible: true,
-        title: `${line.kind === "support" ? "S" : "R"} ${sourceInterval} (${line.touches})`,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: false,
+        title: "",
       }),
     );
   };
@@ -392,27 +392,6 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
         </div>
       )}
     </div>
-  );
-}
-
-function eventAnnotations(event: AnalystEvent): ChartAnnotation[] {
-  const raw = event.payload?.chart_annotations;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter(isChartAnnotation);
-}
-
-function isChartAnnotation(value: unknown): value is ChartAnnotation {
-  if (!value || typeof value !== "object") return false;
-  const item = value as Record<string, unknown>;
-  const kind = item.kind;
-  if ((kind === "support" || kind === "resistance") && typeof item.price === "number" && typeof item.label === "string") return true;
-  return (
-    kind === "trend" &&
-    typeof item.start_time === "string" &&
-    typeof item.end_time === "string" &&
-    typeof item.start_price === "number" &&
-    typeof item.end_price === "number" &&
-    typeof item.label === "string"
   );
 }
 

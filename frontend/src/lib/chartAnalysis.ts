@@ -1,4 +1,4 @@
-import type { Candle, ChartInterval } from "./types";
+import type { AnalystEvent, Candle, ChartAnnotation, ChartInterval, SymbolCode } from "./types";
 
 export type SupportResistanceLine = {
   price: number;
@@ -16,6 +16,33 @@ export function parseSupportResistanceInterval(message: string): ChartInterval |
 
 export function wantsSupportResistance(message: string): boolean {
   return /(support|resistance|s\/r|\bsr\b)/i.test(message);
+}
+
+/**
+ * Return one current annotation set for the selected market.
+ *
+ * Analyst events are historical records. Rendering every record turns old
+ * support/resistance opinions into a growing wall of chart lines, so the chart
+ * uses only the newest event that actually contains valid annotations.
+ */
+export function selectVisibleChartAnnotations(
+  events: AnalystEvent[],
+  symbol: SymbolCode,
+  mergeToleranceRatio = 0.0025,
+): ChartAnnotation[] {
+  const newestAnnotatedEvent = [...events]
+    .filter((event) => event.symbol === symbol || event.symbol === "ALL")
+    .sort((left, right) => Date.parse(right.created_at_utc) - Date.parse(left.created_at_utc))
+    .find((event) => readChartAnnotations(event).length > 0);
+
+  if (!newestAnnotatedEvent) return [];
+
+  const visible: ChartAnnotation[] = [];
+  for (const annotation of readChartAnnotations(newestAnnotatedEvent)) {
+    const duplicate = visible.some((existing) => annotationsOverlap(existing, annotation, mergeToleranceRatio));
+    if (!duplicate) visible.push(annotation);
+  }
+  return visible.slice(0, 6);
 }
 
 export function calculateSupportResistance(candles: Candle[], maxLines = 6): SupportResistanceLine[] {
@@ -73,4 +100,37 @@ export function calculateSupportResistance(candles: Candle[], maxLines = 6): Sup
     .slice(0, Math.floor(maxLines / 2));
 
   return [...supports, ...resistances].sort((left, right) => left.price - right.price);
+}
+
+function readChartAnnotations(event: AnalystEvent): ChartAnnotation[] {
+  const raw = event.payload?.chart_annotations;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isChartAnnotation);
+}
+
+function isChartAnnotation(value: unknown): value is ChartAnnotation {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  const kind = item.kind;
+  if ((kind === "support" || kind === "resistance") && typeof item.price === "number" && typeof item.label === "string") {
+    return Number.isFinite(item.price);
+  }
+  return (
+    kind === "trend" &&
+    typeof item.start_time === "string" &&
+    typeof item.end_time === "string" &&
+    typeof item.start_price === "number" &&
+    typeof item.end_price === "number" &&
+    typeof item.label === "string"
+  );
+}
+
+function annotationsOverlap(left: ChartAnnotation, right: ChartAnnotation, toleranceRatio: number): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "trend" && right.kind === "trend") {
+    return left.start_time === right.start_time && left.end_time === right.end_time;
+  }
+  if (left.kind === "trend" || right.kind === "trend") return false;
+  const referencePrice = Math.max(Math.abs(left.price), Math.abs(right.price), 1);
+  return Math.abs(left.price - right.price) <= referencePrice * toleranceRatio;
 }
