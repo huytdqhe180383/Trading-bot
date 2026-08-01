@@ -126,7 +126,7 @@ class DiscordAnalystTest(unittest.TestCase):
 
         message = format_news_message([item.to_dict() for item in items], symbol="BTCUSDT")
 
-        self.assertIn("Latest public crypto news", message)
+        self.assertIn("Latest public news and official alerts", message)
         self.assertIn("Bitcoin traders watch ETF inflows", message)
 
 

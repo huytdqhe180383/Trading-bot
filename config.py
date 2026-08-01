@@ -266,6 +266,27 @@ ANALYST_RL_EVIDENCE_PATH = Path(
 )
 ANALYST_RL_EVIDENCE_MAX_AGE_SECS = _env_int("ANALYST_RL_EVIDENCE_MAX_AGE_SECS", 86_400)
 
+# Official X accounts are an alert source only. The X API requires an app-only
+# bearer token; posts are never treated as authoritative economic releases.
+X_NEWS_BEARER_TOKEN = _env_str("X_NEWS_BEARER_TOKEN", "")
+X_NEWS_ACCOUNTS = _env_csv(
+    "X_NEWS_ACCOUNTS",
+    (
+        "BLS_gov",
+        "BEA_News",
+        "FederalReserve",
+        "uscensusbureau",
+        "EIAgov",
+        "USTreasury",
+        "ECB",
+        "bankofengland",
+        "statcan_eng",
+        "absstats",
+    ),
+)
+X_NEWS_POSTS_PER_ACCOUNT = _env_int("X_NEWS_POSTS_PER_ACCOUNT", 2)
+X_NEWS_API_BASE_URL = _env_str("X_NEWS_API_BASE_URL", "https://api.x.com/2")
+
 LLM_BASE_URL = _env_str("LLM_BASE_URL", "")
 LLM_API_KEY = _env_str("LLM_API_KEY", "")
 LLM_MODEL = _env_str("LLM_MODEL", "")

@@ -80,6 +80,12 @@ is passed to an LLM role. A news analyst is intentionally deferred until a
 source with adequate attribution, timestamps, coverage, and reliability checks
 is available.
 
+The utility combines crypto RSS headlines with recent original X posts from
+configured official macro accounts. X requires `X_NEWS_BEARER_TOKEN` and is an
+alert layer only: follow its link and verify every release or revision at the
+issuer's primary website before relying on it. The utility never feeds an LLM
+or bypasses deterministic risk controls.
+
 ### Risk validator
 
 **Purpose:** Independently challenge an existing analyst alert before an
