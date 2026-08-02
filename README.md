@@ -66,6 +66,12 @@ screening loop and the strong 15-minute scheduled analysis loop. Run
 `scripts/run_analyst.py` only for a standalone/headless scanner; do not launch
 both against the same operational database.
 
+Repeated LLM failures are circuit-broken per request lane. After three
+consecutive failures, that lane pauses for five minutes and performs one
+automatic retry; cooldown checks do not consume call budget or emit repeated
+Discord alerts/error-report entries. Configure this with
+`LLM_FAILURE_THRESHOLD` and `LLM_FAILURE_COOLDOWN_SECS`.
+
 ## Storage Model
 
 - `data/raw/` and `data/processed/`: local market data.

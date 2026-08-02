@@ -133,6 +133,8 @@ def _risk_trigger(snapshot: dict) -> str:
 
 
 def _is_significant(event: object, *, trigger: str = "") -> bool:
+    if str(getattr(event, "status", "")).lower() != "ok":
+        return False
     if trigger:
         return True
     recommendation = str(getattr(event, "recommendation", "")).upper()

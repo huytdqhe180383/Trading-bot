@@ -70,6 +70,7 @@ class AnalystStatus:
     events_count: int
     budgets: dict[str, Any]
     latest_event: dict[str, Any] | None = None
+    circuits: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

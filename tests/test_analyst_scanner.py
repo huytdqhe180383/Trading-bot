@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from tradingbot.analyst.models import AnalystEvent
-from tradingbot.analyst.scanner import AnalystScanner, _cadence_key
+from tradingbot.analyst.scanner import AnalystScanner, _cadence_key, _is_significant
 
 
 class _FakeService:
@@ -37,6 +37,19 @@ class AnalystScannerTest(unittest.TestCase):
 
         self.assertEqual([call["scope"] for call in service.calls], ["screening", "scheduled", "screening"])
         self.assertEqual([call["analysis_mode"] for call in service.calls], ["screening", "scheduled", "screening"])
+
+    def test_provider_error_is_never_sent_to_discord_even_during_a_risk_trigger(self):
+        event = AnalystEvent(
+            event_type="screening",
+            status="error",
+            title="ETHUSDT weak screening",
+            message="LLM unavailable: invalid token",
+            symbol="ETHUSDT",
+            role="main_analyst",
+        )
+
+        self.assertFalse(_is_significant(event, trigger="15m_drop"))
+
     def test_cadence_key_groups_five_minute_windows(self):
         first = datetime(2026, 7, 15, 12, 4, 59, tzinfo=timezone.utc)
         second = datetime(2026, 7, 15, 12, 5, 0, tzinfo=timezone.utc)

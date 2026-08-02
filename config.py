@@ -305,6 +305,8 @@ LLM_TIMEOUT_SECS = _env_float("LLM_TIMEOUT_SECS", 20.0)
 LLM_WEAK_TIMEOUT_SECS = _env_float("LLM_WEAK_TIMEOUT_SECS", 20.0)
 LLM_STRONG_TIMEOUT_SECS = _env_float("LLM_STRONG_TIMEOUT_SECS", 60.0)
 LLM_USE_RESPONSE_FORMAT = _env_bool("LLM_USE_RESPONSE_FORMAT", False)
+LLM_FAILURE_THRESHOLD = _env_int("LLM_FAILURE_THRESHOLD", 3)
+LLM_FAILURE_COOLDOWN_SECS = _env_float("LLM_FAILURE_COOLDOWN_SECS", 300.0)
 # Screening and scheduled analysis have deliberately separate budgets so the
 # high-frequency weak lane cannot consume the operator's manual strong-model
 # allowance. The legacy background budget remains import-compatible.

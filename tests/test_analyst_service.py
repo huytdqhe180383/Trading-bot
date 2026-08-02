@@ -86,6 +86,27 @@ class AnalystServiceTest(unittest.TestCase):
             self.assertIn("LLM unavailable", event.message)
             self.assertTrue(list((Path(tmp_name) / "report" / "daily").glob("*/analyst_errors_*.md")))
 
+    def test_repeated_provider_errors_open_a_scope_cooldown(self):
+        with TemporaryDirectory() as tmp_name:
+            tmp = type("Tmp", (), {"name": tmp_name})
+            llm = _FakeLLM(error=LLMProviderError("invalid token"))
+            service = self._service(tmp, llm=llm, background_budget=10)
+
+            events = [
+                service.run_update(
+                    symbol="ETHUSDT",
+                    market_snapshot={"source": "test"},
+                    scope="screening",
+                    analysis_mode="screening",
+                )
+                for _ in range(5)
+            ]
+
+            self.assertEqual(llm.calls, 3)
+            self.assertEqual([event.status for event in events], ["error", "error", "error", "cooldown", "cooldown"])
+            error_report = next((Path(tmp_name) / "report" / "daily").glob("*/analyst_errors_*.md"))
+            self.assertEqual(error_report.read_text(encoding="utf-8").count("invalid token"), 3)
+
     def test_invalid_payload_records_invalid_response_without_fallback(self):
         with TemporaryDirectory() as tmp_name:
             tmp = type("Tmp", (), {"name": tmp_name})

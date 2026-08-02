@@ -17,6 +17,8 @@ from config import (
     LLM_API_KEY,
     LLM_BASE_URL,
     LLM_BACKGROUND_MODEL,
+    LLM_FAILURE_COOLDOWN_SECS,
+    LLM_FAILURE_THRESHOLD,
     LLM_INTERACTIVE_MODEL,
     LLM_INTERACTIVE_CALL_BUDGET,
     LLM_SCHEDULED_CALL_BUDGET,
@@ -33,6 +35,7 @@ from config import (
 from tradingbot.prompts import ANALYST_PROMPT_VERSION, analyst_system_prompt
 
 from .budget import LLMBudget, LLMBudgetExhausted
+from .circuit_breaker import LLMCircuitBreaker, LLMCircuitOpen
 from .llm import LLMInvalidResponseError, LLMProviderError, OpenAICompatibleLLMClient
 from .market import fetch_public_snapshot
 from .models import AnalystEvent, AnalystStatus, AnalystValidationError, validate_analyst_payload
@@ -53,6 +56,7 @@ class AnalystService:
         enabled: bool = False,
         event_limit: int = 200,
         rl_evidence_provider: Callable[[], dict[str, Any]] | None = None,
+        circuit_breaker: LLMCircuitBreaker | None = None,
     ) -> None:
         base_client = llm_client or interactive_llm_client or background_llm_client
         if base_client is None:
@@ -64,6 +68,7 @@ class AnalystService:
         self.enabled = bool(enabled)
         self.event_limit = max(1, int(event_limit))
         self.rl_evidence_provider = rl_evidence_provider
+        self.circuit_breaker = circuit_breaker or LLMCircuitBreaker()
 
     def status(self) -> AnalystStatus:
         events = self.store.load_events(limit=self.event_limit)
@@ -72,6 +77,7 @@ class AnalystService:
             events_count=len(events),
             budgets=self.budget.snapshot(),
             latest_event=events[-1] if events else None,
+            circuits=self.circuit_breaker.snapshot(),
         )
 
     def events(self, *, limit: int | None = None) -> list[dict[str, Any]]:
@@ -286,6 +292,17 @@ class AnalystService:
             "rl_evidence": prompt_payload.get("rl_evidence", self._safe_rl_evidence()),
         }
         try:
+            self.circuit_breaker.check(normalized_scope)
+        except LLMCircuitOpen as exc:
+            return self._cooldown_event(
+                event_type=event_type,
+                title=title,
+                role=role,
+                message=str(exc),
+                prompt_payload=prompt_payload,
+                event_id=event_id,
+            )
+        try:
             self.budget.reserve(normalized_scope)
             if role == "main_analyst" and normalized_scope == "interactive" and event_type in {"analysis", "chat_reply"}:
                 prompt_payload["auxiliary_views"] = self._build_auxiliary_views(prompt_payload)
@@ -308,8 +325,10 @@ class AnalystService:
                 error_code="budget_exhausted",
                 message=str(exc),
                 prompt_payload=prompt_payload,
+                event_id=event_id,
             )
         except (LLMProviderError, LLMInvalidResponseError) as exc:
+            self.circuit_breaker.record_failure(normalized_scope, exc)
             status = "invalid_response" if isinstance(exc, LLMInvalidResponseError) else "error"
             return self._record_failure(
                 event_type=event_type,
@@ -319,8 +338,10 @@ class AnalystService:
                 error_code=type(exc).__name__,
                 message=str(exc),
                 prompt_payload=prompt_payload,
+                event_id=event_id,
             )
         except AnalystValidationError as exc:
+            self.circuit_breaker.record_failure(normalized_scope, exc)
             return self._record_failure(
                 event_type=event_type,
                 title=title,
@@ -329,7 +350,10 @@ class AnalystService:
                 error_code="AnalystValidationError",
                 message=str(exc),
                 prompt_payload=prompt_payload,
+                event_id=event_id,
             )
+
+        self.circuit_breaker.record_success(normalized_scope)
 
         event = AnalystEvent(
             event_type=event_type,
@@ -372,6 +396,7 @@ class AnalystService:
             ),
         ):
             try:
+                self.circuit_breaker.check("screening")
                 self.budget.reserve("screening")
                 raw = self.background_llm_client.chat_json(
                     messages=[
@@ -383,6 +408,7 @@ class AnalystService:
                     ],
                 )
                 parsed = validate_analyst_payload(raw)
+                self.circuit_breaker.record_success("screening")
                 views.append(
                     {
                         "role": role,
@@ -397,7 +423,28 @@ class AnalystService:
                         "prompt_version": ANALYST_PROMPT_VERSION,
                     }
                 )
-            except (LLMBudgetExhausted, LLMProviderError, LLMInvalidResponseError, AnalystValidationError) as exc:
+            except LLMCircuitOpen as exc:
+                views.append(
+                    {
+                        "role": role,
+                        "status": "cooldown",
+                        "error_code": type(exc).__name__,
+                        "message": str(exc),
+                        "llm_model": getattr(self.background_llm_client, "model", ""),
+                    }
+                )
+            except LLMBudgetExhausted as exc:
+                views.append(
+                    {
+                        "role": role,
+                        "status": "unavailable",
+                        "error_code": type(exc).__name__,
+                        "message": str(exc),
+                        "llm_model": getattr(self.background_llm_client, "model", ""),
+                    }
+                )
+            except (LLMProviderError, LLMInvalidResponseError, AnalystValidationError) as exc:
+                self.circuit_breaker.record_failure("screening", exc)
                 views.append(
                     {
                         "role": role,
@@ -419,6 +466,7 @@ class AnalystService:
         error_code: str,
         message: str,
         prompt_payload: dict[str, Any],
+        event_id: str | None = None,
     ) -> AnalystEvent:
         event = AnalystEvent(
             event_type=event_type,
@@ -434,8 +482,36 @@ class AnalystService:
                 "llm_model": prompt_payload.get("llm_model", ""),
                 "rl_evidence": prompt_payload.get("rl_evidence", {}),
             },
+            **({"id": event_id} if event_id else {}),
         )
         return self.store.append(event)
+
+    def _cooldown_event(
+        self,
+        *,
+        event_type: str,
+        title: str,
+        role: str,
+        message: str,
+        prompt_payload: dict[str, Any],
+        event_id: str | None = None,
+    ) -> AnalystEvent:
+        """Return cooldown state without writing another event or error report."""
+        return AnalystEvent(
+            event_type=event_type,
+            status="cooldown",
+            title=title,
+            message=message,
+            symbol=str(prompt_payload.get("symbol", "ALL")),
+            role=role,
+            error_code="LLMCircuitOpen",
+            payload={
+                "scope": _normalize_llm_scope(str(prompt_payload.get("scope", ""))),
+                "symbol": prompt_payload.get("symbol", "ALL"),
+                "llm_model": prompt_payload.get("llm_model", ""),
+            },
+            **({"id": event_id} if event_id else {}),
+        )
 
     def _llm_client_for_scope(self, scope: str) -> OpenAICompatibleLLMClient:
         if _normalize_llm_scope(scope) == "screening":
@@ -486,6 +562,10 @@ def create_default_analyst_service() -> AnalystService:
         ),
         enabled=ANALYST_ENABLED,
         event_limit=ANALYST_EVENT_LIMIT,
+        circuit_breaker=LLMCircuitBreaker(
+            failure_threshold=LLM_FAILURE_THRESHOLD,
+            cooldown_secs=LLM_FAILURE_COOLDOWN_SECS,
+        ),
     )
 
 
