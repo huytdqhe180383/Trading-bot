@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Pause, Play, RefreshCw } from "lucide-react";
-import { fetchAnalystStatus, setTimeframeSchedulerPaused } from "@/lib/api";
+import { Pause, Play, RefreshCw, RotateCcw } from "lucide-react";
+import { fetchAnalystStatus, restartAnalystWeb, setTimeframeSchedulerPaused } from "@/lib/api";
 import type { AnalystRuntimeStatus } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
 
@@ -14,6 +14,7 @@ export default function TimeframeAnalysisPanel() {
   const [status, setStatus] = useState<AnalystRuntimeStatus | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const { events } = useTradingStore();
   const refresh = async () => {
     try { setStatus(await fetchAnalystStatus()); } catch (error) { setMessage(error instanceof Error ? error.message : "Scheduler status unavailable."); }
@@ -30,8 +31,19 @@ export default function TimeframeAnalysisPanel() {
     finally { setBusy(false); }
   };
   const paused = Boolean(status?.scheduler?.paused);
+  const reset = async () => {
+    setResetting(true); setMessage("");
+    try {
+      const result = await restartAnalystWeb();
+      setMessage(result.message);
+      window.setTimeout(() => window.location.reload(), 4_000);
+    } catch (error) {
+      setResetting(false);
+      setMessage(error instanceof Error ? error.message : "Could not restart the local UI.");
+    }
+  };
   return <section className="timeframe-panel glass-panel">
-    <header className="timeframe-header"><div><h2>BTC timeframe analysis</h2><p>{paused ? "Paused — no new timeframe analysis will start." : "Closed-candle analysis only; filtered separately from manual chat."}</p></div><div className="timeframe-actions"><button className="button ghost" onClick={() => void refresh()} aria-label="Refresh timeframe status"><RefreshCw size={14} /></button><button className={`button ${paused ? "primary" : "ghost"}`} onClick={() => void toggle()} disabled={busy}>{paused ? <><Play size={14} /> Resume</> : <><Pause size={14} /> Stop</>}</button></div></header>
+    <header className="timeframe-header"><div><h2>BTC timeframe analysis</h2><p>{paused ? "Paused — no new timeframe analysis will start." : "Closed-candle analysis only; filtered separately from manual chat."}</p></div><div className="timeframe-actions"><button className="button ghost" onClick={() => void refresh()} aria-label="Refresh timeframe status"><RefreshCw size={14} /></button><button className="button ghost" onClick={() => void reset()} disabled={resetting} title="Restart local UI and timeframe service"> <RotateCcw size={14} /> {resetting ? "Resetting" : "Reset UI"}</button><button className={`button ${paused ? "primary" : "ghost"}`} onClick={() => void toggle()} disabled={busy || resetting}>{paused ? <><Play size={14} /> Resume</> : <><Pause size={14} /> Stop</>}</button></div></header>
     <div className="timeframe-filters">{FILTERS.map((item) => <button key={item} className={`filter-chip ${filter === item ? "active" : ""}`} onClick={() => setFilter(item)}>{item === "all" ? "All" : item}</button>)}</div>
     {message && <p className="timeframe-message">{message}</p>}
     <div className="timeframe-events">{entries.length === 0 ? <p className="hint">No BTC {filter === "all" ? "timeframe" : filter} analysis yet.</p> : entries.map((event) => <article className={`timeframe-event ${event.status === "ok" ? "" : "error"}`} key={event.id}><div><span className="timeframe-tag">{event.event_type.replace("timeframe_", "")}</span><span className="event-meta">{formatTime(event.created_at_utc)}</span></div><strong>{event.recommendation || event.status}</strong><p>{event.message}</p>{event.risk_notes && <small>{event.risk_notes}</small>}</article>)}</div>

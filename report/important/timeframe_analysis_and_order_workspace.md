@@ -33,6 +33,9 @@
   is no longer drawn as repeated chart markers or inserted into manual chat.
 - The timeframe box provides a Stop/Resume control. Stopping pauses future
   work without shutting down the web service or deleting events.
+- The **Reset UI** control schedules the repository's local restart script
+  after returning its acknowledgement. It restarts both the API/timeframe
+  process and the Next.js frontend, then reloads the dashboard.
 
 ## Provider diagnosis (2026-08-02)
 

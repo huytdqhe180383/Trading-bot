@@ -244,6 +244,7 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
     app = FastAPI(title="Trading Bot Private UI", lifespan=lifespan)
     app.state.analyst_scheduler_tasks = {}
     app.state.analyst_scanner = None
+    app.state.restart_requested = False
     app.state.ctx = context
     app.add_middleware(
         SessionMiddleware,
@@ -454,6 +455,32 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
             request=request,
         )
         return JSONResponse({"paused": scanner.paused, "message": "Timeframe analysis paused." if scanner.paused else "Timeframe analysis resumed."})
+
+    @app.post("/api/analyst/restart")
+    async def api_analyst_restart(request: Request) -> JSONResponse:
+        """Restart the local frontend/backend stack after this response flushes."""
+        await _validate_csrf(request)
+        if getattr(app.state, "restart_requested", False):
+            raise HTTPException(status_code=409, detail="A local UI restart is already in progress.")
+        app.state.restart_requested = True
+        restart_script = UI_ROOT.parent / "scripts" / "restart_analyst_web.ps1"
+        if not restart_script.is_file():
+            app.state.restart_requested = False
+            raise HTTPException(status_code=500, detail="Local UI restart script is unavailable.")
+
+        async def restart_after_response() -> None:
+            await asyncio.sleep(0.75)
+            subprocess.Popen(
+                [
+                    "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(restart_script),
+                ],
+                cwd=str(UI_ROOT.parent),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+
+        asyncio.create_task(restart_after_response(), name="restart-analyst-web")
+        _write_audit(context, "analyst_web_restart", outcome="requested", request=request)
+        return JSONResponse({"message": "Restarting the local UI and timeframe service. Reconnect in a few seconds."})
 
     @app.get("/api/analyst/events")
     async def api_analyst_events(request: Request, limit: int | None = None) -> JSONResponse:

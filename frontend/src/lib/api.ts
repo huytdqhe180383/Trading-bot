@@ -104,6 +104,10 @@ export async function setTimeframeSchedulerPaused(paused: boolean): Promise<{ pa
   });
 }
 
+export async function restartAnalystWeb(): Promise<{ message: string }> {
+  return requestJson<{ message: string }>("/api/analyst/restart", { method: "POST" });
+}
+
 export async function fetchAnalystStatus(): Promise<AnalystRuntimeStatus> {
   return requestJson<AnalystRuntimeStatus>("/api/analyst/status");
 }
