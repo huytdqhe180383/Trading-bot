@@ -1,4 +1,4 @@
-import type { AnalystBudget, AnalystEvent, Candle, ChartInterval, SymbolCode } from "./types";
+import type { AnalystBudget, AnalystEvent, Candle, ChartInterval, OrderSuggestion, SymbolCode } from "./types";
 
 const DEFAULT_API_URL = "http://127.0.0.1:8080";
 const DEFAULT_WS_URL = "ws://127.0.0.1:8080/ws/analyst";
@@ -7,11 +7,13 @@ export const API_URL = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL;
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || DEFAULT_WS_URL;
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const csrf = init?.method && init.method !== "GET" ? await fetchCsrfToken() : "";
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...(csrf ? { "x-csrf-token": csrf } : {}),
       ...(init?.headers || {}),
     },
   });
@@ -28,6 +30,16 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+let csrfToken = "";
+async function fetchCsrfToken(): Promise<string> {
+  if (csrfToken) return csrfToken;
+  const response = await fetch(`${API_URL}/api/session/csrf`, { credentials: "include" });
+  if (!response.ok) throw new Error("Could not start the local operator session.");
+  const data = (await response.json()) as { csrf_token?: string };
+  csrfToken = data.csrf_token || "";
+  return csrfToken;
 }
 
 export async function fetchCandles(symbol: SymbolCode, interval: ChartInterval, limit = 500): Promise<Candle[]> {
@@ -83,4 +95,21 @@ export async function fetchLatestNews(symbol: SymbolCode): Promise<AnalystEvent>
     method: "POST",
     body: JSON.stringify({ symbol, latest_news: true }),
   });
+}
+
+export async function fetchOrderSuggestions(): Promise<OrderSuggestion[]> {
+  const data = await requestJson<{ suggestions: OrderSuggestion[] }>("/api/orders/suggestions");
+  return data.suggestions;
+}
+
+export async function requestOrderAdvice(symbol: SymbolCode, instruction: string): Promise<AnalystEvent> {
+  return requestJson<AnalystEvent>("/api/orders/advice", { method: "POST", body: JSON.stringify({ symbol, instruction }) });
+}
+
+export async function confirmOrderSuggestion(suggestion_id: string): Promise<AnalystEvent> {
+  return requestJson<AnalystEvent>("/api/orders/confirm", { method: "POST", body: JSON.stringify({ suggestion_id }) });
+}
+
+export async function rejectOrderSuggestion(suggestion_id: string): Promise<AnalystEvent> {
+  return requestJson<AnalystEvent>("/api/orders/reject", { method: "POST", body: JSON.stringify({ suggestion_id }) });
 }

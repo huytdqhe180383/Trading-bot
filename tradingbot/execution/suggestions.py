@@ -36,6 +36,15 @@ class OrderSuggestionStore:
             ).fetchone()
         return json.loads(row["record_json"]) if row else None
 
+    def list(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        self._import_legacy_suggestions()
+        with self.database.read() as connection:
+            rows = connection.execute(
+                "SELECT record_json FROM order_suggestions ORDER BY updated_at_utc DESC LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [json.loads(row["record_json"]) for row in rows]
+
     def update(self, suggestion_id: str, **changes: Any) -> dict[str, Any] | None:
         current = self.get(suggestion_id)
         if current is None:

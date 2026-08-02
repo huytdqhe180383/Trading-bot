@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import Lock
-from typing import Callable
+from typing import Callable, Mapping
 from zoneinfo import ZoneInfo
 
 
@@ -18,6 +18,7 @@ class LLMBudget:
     background_daily_limit: int
     interactive_daily_limit: int
     scheduled_daily_limit: int | None = None
+    scope_limits: Mapping[str, int] | None = None
     tz_name: str = "UTC"
     now_func: Callable[[], datetime] | None = None
     _used_by_day: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -27,7 +28,8 @@ class LLMBudget:
         normalized = _normalize_scope(scope)
         day = self._today_key()
         with self._lock:
-            used = self._used_by_day.setdefault(day, {"screening": 0, "scheduled": 0, "interactive": 0})
+            used = self._used_by_day.setdefault(day, {})
+            used.setdefault(normalized, 0)
             limit = self._limit_for(normalized)
             if used[normalized] >= limit:
                 raise LLMBudgetExhausted(f"{normalized} LLM budget exhausted for {day}.")
@@ -36,7 +38,9 @@ class LLMBudget:
     def snapshot(self) -> dict[str, int | str]:
         day = self._today_key()
         with self._lock:
-            used = self._used_by_day.setdefault(day, {"screening": 0, "scheduled": 0, "interactive": 0})
+            used = self._used_by_day.setdefault(day, {})
+            for scope in ("screening", "scheduled", "interactive"):
+                used.setdefault(scope, 0)
             screening_limit = int(self.background_daily_limit)
             scheduled_limit = int(self.scheduled_daily_limit if self.scheduled_daily_limit is not None else self.interactive_daily_limit)
             return {
@@ -50,9 +54,15 @@ class LLMBudget:
                 # Compatibility aliases for older clients.
                 "background_used": int(used["screening"]),
                 "background_limit": screening_limit,
+                "timeframes": {
+                    scope: {"used": int(used.get(scope, 0)), "limit": self._limit_for(scope)}
+                    for scope in sorted((self.scope_limits or {}).keys())
+                },
             }
 
     def _limit_for(self, scope: str) -> int:
+        if self.scope_limits and scope in self.scope_limits:
+            return max(0, int(self.scope_limits[scope]))
         if scope == "screening":
             return max(0, int(self.background_daily_limit))
         if scope == "scheduled":
@@ -74,6 +84,8 @@ def _normalize_scope(scope: str) -> str:
     normalized = str(scope or "interactive").strip().lower()
     if normalized == "background":
         return "screening"
-    if normalized not in {"screening", "scheduled", "interactive"}:
-        raise ValueError("scope must be screening, scheduled, or interactive.")
+    if normalized.startswith("timeframe_"):
+        return normalized
+    if normalized not in {"screening", "scheduled", "interactive", "manual"}:
+        raise ValueError("scope must be screening, scheduled, interactive, manual, or timeframe_<interval>.")
     return normalized

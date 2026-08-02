@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, LineChart } from "lucide-react";
+import { Bot, ClipboardList, LineChart } from "lucide-react";
 import AnalystSidebar from "@/components/AnalystSidebar";
 import ChartPanel from "@/components/ChartPanel";
 import StatusPill from "@/components/StatusPill";
 import Toolbar from "@/components/Toolbar";
+import OrdersJournalPanel from "@/components/OrdersJournalPanel";
 import { useTradingStore } from "@/store/useTradingStore";
 
 export default function Home() {
   const [drawingEnabled, setDrawingEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<"analysis" | "orders">("analysis");
   const { symbol, interval } = useTradingStore();
 
   return (
@@ -34,8 +36,12 @@ export default function Home() {
           <StatusPill label={busy ? "LLM running" : "Advisory only"} tone={busy ? "warn" : "ok"} />
         </header>
 
-        <div className="workspace">
-          <section className="chart-workspace">
+          <div className="workspace-tabs" role="tablist" aria-label="Dashboard workspace">
+            <button className={`workspace-tab ${tab === "analysis" ? "active" : ""}`} onClick={() => setTab("analysis")} role="tab" aria-selected={tab === "analysis"}><LineChart size={15} /> Analysis</button>
+            <button className={`workspace-tab ${tab === "orders" ? "active" : ""}`} onClick={() => setTab("orders")} role="tab" aria-selected={tab === "orders"}><ClipboardList size={15} /> Orders & journal</button>
+          </div>
+          {tab === "analysis" ? <div className="workspace">
+            <section className="chart-workspace">
             <Toolbar
               drawingEnabled={drawingEnabled}
               onToggleDrawing={() => setDrawingEnabled((enabled) => !enabled)}
@@ -44,7 +50,7 @@ export default function Home() {
             <ChartPanel drawingEnabled={drawingEnabled} setError={setError} />
           </section>
           <AnalystSidebar busy={busy} setBusy={setBusy} setError={setError} />
-        </div>
+          </div> : <div className="orders-workspace"><OrdersJournalPanel symbol={symbol} /></div>}
       </section>
     </main>
   );

@@ -51,6 +51,7 @@ from ui.services import (
 from tradingbot.analyst import AnalystService, create_default_analyst_service
 from tradingbot.analyst.market import fetch_public_candles
 from tradingbot.analyst.scanner import create_default_scanner
+from tradingbot.execution.service import TradingExecutionService, create_default_execution_service
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
@@ -78,6 +79,7 @@ class UIAppContext:
     control_runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None
     rate_limiter: InMemoryRateLimiter = field(default_factory=InMemoryRateLimiter)
     analyst_service: AnalystService | None = None
+    execution_service: TradingExecutionService | None = None
     cors_allowed_origins: tuple[str, ...] = UI_CORS_ALLOWED_ORIGINS
 
 
@@ -88,6 +90,15 @@ class AnalystRunRequest(BaseModel):
     explain_alert_id: str | None = None
     latest_news: bool = False
     market_snapshot: dict[str, Any] | None = None
+
+
+class OrderAdviceRequest(BaseModel):
+    symbol: str = "BTCUSDT"
+    instruction: str
+
+
+class OrderActionRequest(BaseModel):
+    suggestion_id: str
 
 
 def _client_identity(request: Request) -> str:
@@ -183,6 +194,8 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
     context = ctx or UIAppContext()
     if context.analyst_service is None:
         context.analyst_service = create_default_analyst_service()
+    if context.execution_service is None:
+        context.execution_service = create_default_execution_service(analyst_service=context.analyst_service)
     run_embedded_scanner = ctx is None and context.analyst_service.enabled
 
     @asynccontextmanager
@@ -208,13 +221,9 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
 
             scanner_tasks = [
                 asyncio.create_task(
-                    periodic_loop(scanner.run_screening_once, max(1, int(scanner.scan_interval_secs))),
-                    name="analyst-screening",
-                ),
-                asyncio.create_task(
-                    periodic_loop(scanner.run_scheduled_once, _cadence_seconds(scanner.background_analysis_cadence)),
-                    name="analyst-scheduled",
-                ),
+                    periodic_loop(scanner.run_once, max(1, int(scanner.scan_interval_secs))),
+                    name="analyst-timeframe-orchestrator",
+                )
             ]
             app.state.analyst_scheduler_tasks = {task.get_name(): task for task in scanner_tasks}
         try:
@@ -379,13 +388,11 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
         scanner = getattr(app.state, "analyst_scanner", None)
         payload["scheduler"] = {
             "enabled": run_embedded_scanner,
-            "screening_interval_secs": getattr(scanner, "scan_interval_secs", None),
-            "scheduled_cadence": getattr(scanner, "background_analysis_cadence", ""),
-            "last_screening_completed_at": getattr(scanner, "last_screening_completed_at", ""),
-            "last_screening_results": _scheduler_result_summary(getattr(scanner, "last_screening_results", [])),
-            "screening_stage_by_symbol": getattr(scanner, "screening_stage_by_symbol", {}),
-            "last_scheduled_completed_at": getattr(scanner, "last_scheduled_completed_at", ""),
-            "last_scheduled_results": _scheduler_result_summary(getattr(scanner, "last_scheduled_results", [])),
+            "poll_interval_secs": getattr(scanner, "scan_interval_secs", None),
+            "candle_aligned_timeframes": ["1m", "15m", "1h", "4h"],
+            "last_completed_at": getattr(scanner, "last_screening_completed_at", ""),
+            "last_results": _scheduler_result_summary(getattr(scanner, "last_screening_results", [])),
+            "stage_by_symbol": getattr(scanner, "screening_stage_by_symbol", {}),
             "tasks": {
                 name: {
                     "running": not task.done(),
@@ -442,6 +449,44 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
     async def api_analyst_budget(request: Request) -> JSONResponse:
         _ensure_local_session(request)
         return JSONResponse(context.analyst_service.budget.snapshot())
+
+    @app.get("/api/session/csrf")
+    async def api_csrf(request: Request) -> JSONResponse:
+        return JSONResponse({"csrf_token": _ensure_csrf(request)})
+
+    @app.get("/api/orders/suggestions")
+    async def api_order_suggestions(request: Request, limit: int = 100) -> JSONResponse:
+        _ensure_local_session(request)
+        return JSONResponse({"suggestions": context.execution_service.suggestion_store.list(limit=limit)})
+
+    @app.post("/api/orders/advice")
+    async def api_order_advice(request: Request, payload: OrderAdviceRequest) -> JSONResponse:
+        await _validate_csrf(request)
+        event = await asyncio.to_thread(
+            context.execution_service.suggest_order,
+            symbol=payload.symbol,
+            instruction=payload.instruction,
+            requested_by=LOCAL_OPERATOR_USERNAME,
+        )
+        return JSONResponse(event.to_public_dict())
+
+    @app.post("/api/orders/confirm")
+    async def api_order_confirm(request: Request, payload: OrderActionRequest) -> JSONResponse:
+        await _validate_csrf(request)
+        event = await asyncio.to_thread(
+            context.execution_service.confirm_order,
+            suggestion_id=payload.suggestion_id,
+            requested_by=LOCAL_OPERATOR_USERNAME,
+        )
+        return JSONResponse(event.to_public_dict())
+
+    @app.post("/api/orders/reject")
+    async def api_order_reject(request: Request, payload: OrderActionRequest) -> JSONResponse:
+        await _validate_csrf(request)
+        event = context.execution_service.reject_order(
+            suggestion_id=payload.suggestion_id, requested_by=LOCAL_OPERATOR_USERNAME
+        )
+        return JSONResponse(event.to_public_dict())
 
     @app.get("/api/market/candles")
     async def api_market_candles(

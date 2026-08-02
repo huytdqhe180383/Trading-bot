@@ -77,9 +77,9 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
     }
   }, [events.length, userMessages.length]);
 
-  const screeningEvents = events.filter((event) => event.event_type === "screening" && event.symbol === symbol);
-  const latestScreening = screeningEvents.at(-1);
-  const chatEvents = events.filter((event) => !["news", "news_analysis", "screening"].includes(event.event_type));
+  const timeframeEvents = events.filter((event) => event.event_type === "timeframe_15m" && event.symbol === symbol);
+  const latestTimeframe = timeframeEvents.at(-1);
+  const chatEvents = events.filter((event) => !["news", "news_analysis", "screening", "timeframe_1m"].includes(event.event_type));
   const chatItems: ChatItem[] = [
     ...chatEvents.map((event) => ({ kind: "event" as const, event, created_at_utc: event.created_at_utc })),
     ...userMessages,
@@ -151,12 +151,11 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
           planning levels. It remains advisory and cannot execute an order.
         </p>
         <p className="scanner-heartbeat">
-          Weak 15s screen: {latestScreening ? `${latestScreening.recommendation || "checked"} · ${formatTime(latestScreening.created_at_utc)}` : "starting…"}
+          15m alert lane: {latestTimeframe ? `${latestTimeframe.recommendation || "checked"} · ${formatTime(latestTimeframe.created_at_utc)}` : "waiting for a closed candle…"}
         </p>
         {budget && (
           <p>
-            Manual: {budget.interactive_used}/{budget.interactive_limit} · Screening: {budget.screening_used ?? budget.background_used}/
-            {budget.screening_limit ?? budget.background_limit} · Scheduled: {budget.scheduled_used ?? 0}/{budget.scheduled_limit ?? 0}
+            Manual: {budget.timeframes?.manual?.used ?? budget.interactive_used}/{budget.timeframes?.manual?.limit ?? budget.interactive_limit} · 1m: {budget.timeframes?.timeframe_1m?.used ?? 0}/{budget.timeframes?.timeframe_1m?.limit ?? 0} · 15m: {budget.timeframes?.timeframe_15m?.used ?? 0}/{budget.timeframes?.timeframe_15m?.limit ?? 0}
           </p>
         )}
       </div>

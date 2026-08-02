@@ -42,6 +42,7 @@ export type AnalystBudget = {
   screening_limit?: number;
   scheduled_used?: number;
   scheduled_limit?: number;
+  timeframes?: Record<string, { used: number; limit: number }>;
 };
 
 export type ChartAnnotation =
@@ -70,4 +71,27 @@ export type AnalystScenario = {
   take_profit: number[];
   stop_loss: number | null;
   plan: string;
+};
+
+export type OrderSuggestion = {
+  id: string;
+  status: "pending" | "submitting" | "submitted" | "rejected" | "expired" | "failed" | string;
+  created_at_utc: string;
+  updated_at_utc?: string;
+  expires_at_utc?: string;
+  rationale?: string;
+  risk_notes?: string;
+  confidence?: number | null;
+  order?: {
+    inst_id?: string;
+    side?: string;
+    ord_type?: string;
+    size?: string;
+    size_unit?: string;
+    price?: string | null;
+    slippage_pct?: string;
+    estimated_notional_usdt?: number | string;
+  };
+  execution_summary?: Record<string, unknown>;
+  failure?: string;
 };

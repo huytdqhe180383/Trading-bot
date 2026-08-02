@@ -24,6 +24,8 @@ class OpenAICompatibleLLMClient:
         api_key: str,
         model: str,
         model_config_name: str = "LLM_MODEL",
+        base_url_config_name: str = "LLM_BASE_URL",
+        api_key_config_name: str = "LLM_API_KEY",
         timeout_secs: float = 20.0,
         use_response_format: bool = True,
         post: Callable[..., Any] | None = None,
@@ -32,15 +34,17 @@ class OpenAICompatibleLLMClient:
         self.api_key = str(api_key or "")
         self.model = str(model or "")
         self.model_config_name = str(model_config_name or "LLM_MODEL")
+        self.base_url_config_name = str(base_url_config_name or "LLM_BASE_URL")
+        self.api_key_config_name = str(api_key_config_name or "LLM_API_KEY")
         self.timeout_secs = max(0.001, float(timeout_secs))
         self.use_response_format = bool(use_response_format)
         self._post = post or requests.post
 
     def chat_json(self, *, messages: list[dict[str, str]], temperature: float = 0.0) -> dict[str, Any]:
         if not self.base_url:
-            raise LLMProviderError("LLM_BASE_URL is not configured.")
+            raise LLMProviderError(f"{self.base_url_config_name} is not configured.")
         if not self.api_key:
-            raise LLMProviderError("LLM_API_KEY is not configured.")
+            raise LLMProviderError(f"{self.api_key_config_name} is not configured.")
         if not self.model:
             raise LLMProviderError(f"{self.model_config_name} is not configured.")
 
@@ -93,6 +97,28 @@ class OpenAICompatibleLLMClient:
         if not isinstance(parsed, dict):
             raise LLMInvalidResponseError("LLM response content must be a JSON object.")
         return parsed
+
+
+class FallbackLLMClient:
+    """Use a second configured key only after the primary provider rejects it.
+
+    This intentionally falls back on provider failures, not malformed model
+    output: an invalid response needs investigation, while quota/key rotation
+    is an availability concern.
+    """
+
+    def __init__(self, primary: OpenAICompatibleLLMClient, fallback: OpenAICompatibleLLMClient | None = None) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.model = primary.model
+
+    def chat_json(self, *, messages: list[dict[str, str]], temperature: float = 0.0) -> dict[str, Any]:
+        try:
+            return self.primary.chat_json(messages=messages, temperature=temperature)
+        except LLMProviderError:
+            if self.fallback is None:
+                raise
+            return self.fallback.chat_json(messages=messages, temperature=temperature)
 
 
 def _response_status(response: Any) -> str:

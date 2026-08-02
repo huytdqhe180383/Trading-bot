@@ -6,21 +6,37 @@ live execution modules, order gateways, or allocation fusion code.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from datetime import datetime, timezone
+from typing import Any, Callable, Mapping
 
 from config import (
     ANALYST_ENABLED,
     ANALYST_EVENT_LIMIT,
+    ANALYST_TIMEFRAME_CONTEXT_TTL_SECS,
     ANALYST_RL_EVIDENCE_MAX_AGE_SECS,
     ANALYST_RL_EVIDENCE_PATH,
     LIVE_SESSION_TIMEZONE,
     LLM_API_KEY,
     LLM_BASE_URL,
+    LLM_LOWER_API_KEY,
+    LLM_LOWER_BASE_URL,
+    LLM_LOWER_FALLBACK_API_KEY,
+    LLM_1_HOUR_MODEL,
+    LLM_1_MIN_MODEL,
+    LLM_15_MIN_MODEL,
+    LLM_4_HOUR_MODEL,
+    MANUAL_ANALYSIS_CACHE_SECS,
+    MANUAL_MODEL,
     LLM_BACKGROUND_MODEL,
     LLM_FAILURE_COOLDOWN_SECS,
     LLM_FAILURE_THRESHOLD,
     LLM_INTERACTIVE_MODEL,
     LLM_INTERACTIVE_CALL_BUDGET,
+    LLM_1_HOUR_CALL_BUDGET,
+    LLM_1_MIN_CALL_BUDGET,
+    LLM_15_MIN_CALL_BUDGET,
+    LLM_4_HOUR_CALL_BUDGET,
+    LLM_MANUAL_CALL_BUDGET,
     LLM_SCHEDULED_CALL_BUDGET,
     LLM_SCREENING_CALL_BUDGET,
     LLM_STRONG_TIMEOUT_SECS,
@@ -36,7 +52,7 @@ from tradingbot.prompts import ANALYST_PROMPT_VERSION, analyst_system_prompt
 
 from .budget import LLMBudget, LLMBudgetExhausted
 from .circuit_breaker import LLMCircuitBreaker, LLMCircuitOpen
-from .llm import LLMInvalidResponseError, LLMProviderError, OpenAICompatibleLLMClient
+from .llm import FallbackLLMClient, LLMInvalidResponseError, LLMProviderError, OpenAICompatibleLLMClient
 from .market import fetch_public_snapshot
 from .models import AnalystEvent, AnalystStatus, AnalystValidationError, validate_analyst_payload
 from .news import build_news_snapshot
@@ -57,6 +73,8 @@ class AnalystService:
         event_limit: int = 200,
         rl_evidence_provider: Callable[[], dict[str, Any]] | None = None,
         circuit_breaker: LLMCircuitBreaker | None = None,
+        timeframe_llm_clients: Mapping[str, OpenAICompatibleLLMClient] | None = None,
+        manual_cache_secs: int = MANUAL_ANALYSIS_CACHE_SECS,
     ) -> None:
         base_client = llm_client or interactive_llm_client or background_llm_client
         if base_client is None:
@@ -69,6 +87,8 @@ class AnalystService:
         self.event_limit = max(1, int(event_limit))
         self.rl_evidence_provider = rl_evidence_provider
         self.circuit_breaker = circuit_breaker or LLMCircuitBreaker()
+        self.timeframe_llm_clients = dict(timeframe_llm_clients or {})
+        self.manual_cache_secs = max(0, int(manual_cache_secs))
 
     def status(self) -> AnalystStatus:
         events = self.store.load_events(limit=self.event_limit)
@@ -139,6 +159,40 @@ class AnalystService:
             event_id=f"screening-{normalized_symbol}" if mode == "screening" else None,
         )
 
+    def run_timeframe_update(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        candle_close_ms: int,
+        market_snapshot: dict[str, Any],
+        lower_timeframe_context: list[dict[str, Any]],
+    ) -> AnalystEvent:
+        """Analyze one confirmed candle with only compact lower-timeframe evidence."""
+        lane = _normalize_timeframe(timeframe)
+        scope = f"timeframe_{lane}"
+        normalized_symbol = _normalize_symbol(symbol)
+        return self._call_role(
+            role="main_analyst",
+            event_type=f"timeframe_{lane}",
+            title=f"{normalized_symbol} {lane} closed-candle analysis",
+            prompt_payload={
+                "symbol": normalized_symbol,
+                "analysis_mode": scope,
+                "timeframe": lane,
+                "candle_close_ms": int(candle_close_ms),
+                "market_snapshot": market_snapshot,
+                "lower_timeframe_context": lower_timeframe_context,
+                "task": (
+                    "Analyze this confirmed candle only. Use compact lower-timeframe evidence as context, "
+                    "call out stale or missing context, and return the exact analyst JSON contract. "
+                    "This is advisory evidence, never an executable order."
+                ),
+            },
+            scope=scope,
+            event_id=f"timeframe-{normalized_symbol}-{lane}-{int(candle_close_ms)}",
+        )
+
     def ask(
         self,
         *,
@@ -147,17 +201,23 @@ class AnalystService:
         scope: str = "interactive",
     ) -> AnalystEvent:
         normalized_symbol = _normalize_symbol(symbol)
-        market_snapshot = _safe_public_snapshot(normalized_symbol)
+        compact_context = self.fresh_timeframe_context(symbol=normalized_symbol)
+        legacy_mode = not self.timeframe_llm_clients
+        cached = self._cached_manual_answer(symbol=normalized_symbol, question=question, context=compact_context)
+        if cached is not None:
+            return cached
         prompt_payload = {
             "symbol": normalized_symbol,
             "analysis_mode": "manual",
             "question": str(question or "").strip(),
-            "market_snapshot": market_snapshot,
+            "market_snapshot": _safe_public_snapshot(normalized_symbol) if legacy_mode else {},
+            "timeframe_context": compact_context,
+            "manual_context_fingerprint": _manual_context_fingerprint(question, compact_context),
             "task": (
                 "Answer as a thorough decision-support analyst using the exact JSON contract. If the user "
                 "explicitly asks for position advice, give a "
                 "directional advisory view using BUY, SELL, REDUCE, HOLD, or AVOID based on the supplied "
-                "public market snapshot and any auxiliary views. Do not default to HOLD merely because the answer is "
+                "fresh compact timeframe evidence. Do not default to HOLD merely because the answer is "
                 "advisory; use HOLD only when the evidence is genuinely balanced or insufficient. If the "
                 "question is not about market direction, recommendation may be HOLD while the rationale "
                 "answers the question. Explain momentum, trend, both intraday and swing objectives, and "
@@ -171,8 +231,32 @@ class AnalystService:
             event_type="chat_reply",
             title=f"{normalized_symbol} analyst answer",
             prompt_payload=prompt_payload,
-            scope=scope,
+            scope="interactive" if legacy_mode else "manual",
         )
+
+    def fresh_timeframe_context(self, *, symbol: str, max_age_secs: int | None = None) -> list[dict[str, Any]]:
+        """Return a small, expiry-bounded evidence fan-in for higher/manual lanes."""
+        max_age = int(max_age_secs if max_age_secs is not None else ANALYST_TIMEFRAME_CONTEXT_TTL_SECS)
+        now = datetime.now(timezone.utc)
+        compact: list[dict[str, Any]] = []
+        for event in reversed(self.store.load_events(limit=self.event_limit)):
+            event_type = str(event.get("event_type", ""))
+            if not event_type.startswith("timeframe_") or event.get("status") != "ok":
+                continue
+            if _normalize_symbol(str(event.get("symbol", "ALL"))) != symbol:
+                continue
+            created = _parse_event_time(event.get("created_at_utc"))
+            if created is None or (now - created).total_seconds() > max_age:
+                continue
+            payload = event.get("payload", {}) if isinstance(event.get("payload"), dict) else {}
+            compact.append({
+                "id": event.get("id"), "timeframe": event_type.removeprefix("timeframe_"),
+                "created_at_utc": event.get("created_at_utc"), "recommendation": event.get("recommendation"),
+                "confidence": event.get("confidence"), "rationale": event.get("rationale", ""),
+                "risk_notes": event.get("risk_notes", ""), "invalidation": event.get("invalidation", ""),
+                "horizon_outlook": payload.get("horizon_outlook", []), "scenarios": payload.get("scenarios", []),
+            })
+        return compact[-12:]
 
     def validate(
         self,
@@ -380,6 +464,11 @@ class AnalystService:
                 "horizon_outlook": parsed["horizon_outlook"],
                 "scenarios": parsed["scenarios"],
                 "catalyst_watch": parsed["catalyst_watch"],
+                "timeframe": prompt_payload.get("timeframe", ""),
+                "candle_close_ms": prompt_payload.get("candle_close_ms"),
+                "lower_timeframe_context": prompt_payload.get("lower_timeframe_context", []),
+                "timeframe_context": prompt_payload.get("timeframe_context", []),
+                "manual_context_fingerprint": prompt_payload.get("manual_context_fingerprint", ""),
                 **({"news_snapshot": prompt_payload["news_snapshot"]} if "news_snapshot" in prompt_payload else {}),
             },
             **({"id": event_id} if event_id else {}),
@@ -514,9 +603,30 @@ class AnalystService:
         )
 
     def _llm_client_for_scope(self, scope: str) -> OpenAICompatibleLLMClient:
-        if _normalize_llm_scope(scope) == "screening":
+        normalized = _normalize_llm_scope(scope)
+        if normalized in self.timeframe_llm_clients:
+            return self.timeframe_llm_clients[normalized]
+        if normalized == "screening":
             return self.background_llm_client
         return self.interactive_llm_client
+
+    def _cached_manual_answer(self, *, symbol: str, question: str, context: list[dict[str, Any]]) -> AnalystEvent | None:
+        if self.manual_cache_secs <= 0 or not str(question).strip():
+            return None
+        fingerprint = _manual_context_fingerprint(question, context)
+        now = datetime.now(timezone.utc)
+        for event in reversed(self.store.load_events(limit=self.event_limit)):
+            if event.get("event_type") != "chat_reply" or event.get("status") != "ok":
+                continue
+            if _normalize_symbol(str(event.get("symbol", "ALL"))) != symbol:
+                continue
+            payload = event.get("payload", {}) if isinstance(event.get("payload"), dict) else {}
+            if payload.get("manual_context_fingerprint") != fingerprint:
+                continue
+            created = _parse_event_time(event.get("created_at_utc"))
+            if created and (now - created).total_seconds() <= self.manual_cache_secs:
+                return AnalystEvent(**{key: event.get(key) for key in AnalystEvent.__dataclass_fields__})
+        return None
 
     def _safe_rl_evidence(self) -> dict[str, Any]:
         try:
@@ -531,6 +641,39 @@ class AnalystService:
 
 
 def create_default_analyst_service() -> AnalystService:
+    lower_base = LLM_LOWER_BASE_URL
+    lower_key = LLM_LOWER_API_KEY
+    lower_clients = {
+        f"timeframe_{lane}": FallbackLLMClient(
+            OpenAICompatibleLLMClient(
+            base_url=lower_base,
+            api_key=lower_key,
+            model=model,
+            model_config_name=f"LLM_{label}_MODEL",
+            base_url_config_name="LLM_LOWER_BASE_URL",
+            api_key_config_name="LLM_LOWER_API_KEY",
+            timeout_secs=LLM_WEAK_TIMEOUT_SECS or LLM_TIMEOUT_SECS,
+            use_response_format=LLM_USE_RESPONSE_FORMAT,
+            ),
+            OpenAICompatibleLLMClient(
+                base_url=lower_base, api_key=LLM_LOWER_FALLBACK_API_KEY, model=model,
+                model_config_name=f"LLM_{label}_MODEL fallback", base_url_config_name="LLM_LOWER_BASE_URL",
+                api_key_config_name="LLM_LOWER_FALLBACK_API_KEY", timeout_secs=LLM_WEAK_TIMEOUT_SECS or LLM_TIMEOUT_SECS,
+                use_response_format=LLM_USE_RESPONSE_FORMAT,
+            ) if LLM_LOWER_FALLBACK_API_KEY else None,
+        )
+        for lane, label, model in (("1m", "1_MIN", LLM_1_MIN_MODEL), ("15m", "15_MIN", LLM_15_MIN_MODEL), ("1h", "1_HOUR", LLM_1_HOUR_MODEL))
+    }
+    lower_clients["timeframe_4h"] = OpenAICompatibleLLMClient(
+        base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_4_HOUR_MODEL,
+        model_config_name="LLM_4_HOUR_MODEL", timeout_secs=LLM_STRONG_TIMEOUT_SECS or LLM_TIMEOUT_SECS,
+        use_response_format=LLM_USE_RESPONSE_FORMAT,
+    )
+    lower_clients["manual"] = OpenAICompatibleLLMClient(
+        base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=MANUAL_MODEL,
+        model_config_name="MANUAL_MODEL", timeout_secs=LLM_STRONG_TIMEOUT_SECS or LLM_TIMEOUT_SECS,
+        use_response_format=LLM_USE_RESPONSE_FORMAT,
+    )
     return AnalystService(
         interactive_llm_client=OpenAICompatibleLLMClient(
             base_url=LLM_BASE_URL,
@@ -553,6 +696,13 @@ def create_default_analyst_service() -> AnalystService:
             scheduled_daily_limit=LLM_SCHEDULED_CALL_BUDGET,
             interactive_daily_limit=LLM_INTERACTIVE_CALL_BUDGET,
             tz_name=LIVE_SESSION_TIMEZONE,
+            scope_limits={
+                "timeframe_1m": LLM_1_MIN_CALL_BUDGET,
+                "timeframe_15m": LLM_15_MIN_CALL_BUDGET,
+                "timeframe_1h": LLM_1_HOUR_CALL_BUDGET,
+                "timeframe_4h": LLM_4_HOUR_CALL_BUDGET,
+                "manual": LLM_MANUAL_CALL_BUDGET,
+            },
         ),
         store=AnalystEventStore(
             results_dir=RESULTS_DIR,
@@ -566,6 +716,7 @@ def create_default_analyst_service() -> AnalystService:
             failure_threshold=LLM_FAILURE_THRESHOLD,
             cooldown_secs=LLM_FAILURE_COOLDOWN_SECS,
         ),
+        timeframe_llm_clients=lower_clients,
     )
 
 
@@ -576,6 +727,28 @@ def _normalize_symbol(symbol: str) -> str:
     if value in SYMBOLS:
         return value
     return "ALL"
+
+
+def _normalize_timeframe(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in {"1m", "15m", "1h", "4h"}:
+        raise ValueError("timeframe must be 1m, 15m, 1h, or 4h.")
+    return normalized
+
+
+def _parse_event_time(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _manual_context_fingerprint(question: str, context: list[dict[str, Any]]) -> str:
+    import hashlib
+    import json
+
+    source = {"question": str(question).strip().lower(), "evidence": [item.get("id") for item in context]}
+    return hashlib.sha256(json.dumps(source, sort_keys=True).encode("utf-8")).hexdigest()[:24]
 
 
 def _json_prompt(payload: dict[str, Any]) -> str:
@@ -601,6 +774,10 @@ def _normalize_llm_scope(scope: str) -> str:
         return "screening"
     if normalized == "scheduled":
         return "scheduled"
+    if normalized == "manual":
+        return "manual"
+    if normalized.startswith("timeframe_"):
+        return normalized
     return "interactive"
 
 

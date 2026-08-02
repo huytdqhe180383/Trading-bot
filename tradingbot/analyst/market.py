@@ -36,6 +36,36 @@ def fetch_screening_snapshot(symbol: str, *, timeout_secs: float = 10.0) -> dict
     return _build_snapshot(symbol, intervals=SCREENING_INTERVALS, limit=60, timeout_secs=timeout_secs)
 
 
+def fetch_timeframe_snapshot(
+    symbol: str,
+    *,
+    interval: str,
+    timeout_secs: float = 10.0,
+) -> dict[str, Any]:
+    """Return evidence for a single *confirmed* OKX candle interval.
+
+    The returned ``last_closed_ms`` is the exchange's candle timestamp.  The
+    scheduler keys work to that value, so a service restart cannot create an
+    off-boundary run or duplicate a candle analysis.
+    """
+    normalized = str(symbol or "BTCUSDT").upper()
+    bar = OKX_INTERVAL_MAP.get(str(interval).lower())
+    if normalized not in OKX_SYMBOL_MAP or not bar:
+        raise ValueError("Unsupported symbol or timeframe.")
+    rows = _fetch_okx_candles(inst_id=OKX_SYMBOL_MAP[normalized], bar=bar, limit=120, timeout_secs=timeout_secs)
+    complete = [row for row in rows if len(row) < 9 or str(row[8]) == "1"]
+    if not complete:
+        return {"status": "snapshot_unavailable", "symbol": normalized, "timeframe": interval}
+    summary = _summarize_candles(complete)
+    return {
+        "status": "ok", "source": "okx_public", "symbol": normalized, "inst_id": OKX_SYMBOL_MAP[normalized],
+        "asof_utc": datetime.now(timezone.utc).isoformat(), "timeframe": str(interval).lower(),
+        "last_closed_ms": int(float(complete[-1][0])), "timeframes": {str(interval).lower(): summary},
+        "one_hour": summary if str(interval).lower() == "1h" else {"available": False},
+        "fifteen_minute": summary if str(interval).lower() == "15m" else {"available": False},
+    }
+
+
 def _build_snapshot(
     symbol: str,
     *,

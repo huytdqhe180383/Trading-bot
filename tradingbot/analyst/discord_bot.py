@@ -106,6 +106,9 @@ class DiscordNotifier:
     def enabled(self) -> bool:
         return bool(self.config.bot_token and self.config.alert_channel_id)
 
+    def analyst_enabled(self) -> bool:
+        return bool(self.config.bot_token and self.config.analyst_channel_id)
+
     def send_event(self, event: Any) -> bool:
         if not self.enabled():
             return False
@@ -124,6 +127,20 @@ class DiscordNotifier:
                 "Content-Type": "application/json",
             },
             json=payload,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return True
+
+    def send_analyst_event(self, event: Any) -> bool:
+        """Deliver the 4h digest to the analyst channel even when neutral."""
+        if not self.analyst_enabled():
+            return False
+        formatter = DiscordAnalystBot(service=None, config=self.config)
+        response = self._post(
+            f"{self.api_base}/channels/{self.config.analyst_channel_id}/messages",
+            headers={"Authorization": f"Bot {self.config.bot_token}", "Content-Type": "application/json"},
+            json={"content": formatter.format_event(event)[:1900], "allowed_mentions": {"parse": []}},
             timeout=10,
         )
         response.raise_for_status()

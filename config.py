@@ -270,6 +270,12 @@ ANALYST_RL_EVIDENCE_PATH = Path(
     _env_str("ANALYST_RL_EVIDENCE_PATH", str(RESULTS_DIR / "rl_evidence.json"))
 )
 ANALYST_RL_EVIDENCE_MAX_AGE_SECS = _env_int("ANALYST_RL_EVIDENCE_MAX_AGE_SECS", 86_400)
+# Timeframe analysis is triggered by a newly closed OKX candle, never by the
+# process start time.  The poll interval only controls how quickly that close
+# is noticed.
+ANALYST_TIMEFRAME_POLL_SECS = _env_int("ANALYST_TIMEFRAME_POLL_SECS", 5)
+ANALYST_TIMEFRAME_CONTEXT_TTL_SECS = _env_int("ANALYST_TIMEFRAME_CONTEXT_TTL_SECS", 14_400)
+MANUAL_ANALYSIS_CACHE_SECS = _env_int("MANUAL_ANALYSIS_CACHE_SECS", 300)
 
 # Official X accounts are an alert source only. The X API requires an app-only
 # bearer token; posts are never treated as authoritative economic releases.
@@ -301,6 +307,21 @@ LLM_WEAK_MODEL = _env_str("LLM_WEAK_MODEL", LLM_MODEL)
 LLM_STRONG_MODEL = _env_str("LLM_STRONG_MODEL", LLM_MODEL)
 LLM_BACKGROUND_MODEL = _env_str("LLM_BACKGROUND_MODEL", LLM_WEAK_MODEL)
 LLM_INTERACTIVE_MODEL = _env_str("LLM_INTERACTIVE_MODEL", LLM_STRONG_MODEL)
+# Timeframe-native routing.  The LLM_* names are canonical because shell
+# variables cannot start with a number; the aliases keep hand-authored .env
+# files working without exposing their values in code or diagnostics.
+LLM_1_MIN_MODEL = _env_str("LLM_1_MIN_MODEL", _env_str("1_MIN_MODEL", _env_str("ONE_MIN_MODEL", "")))
+LLM_15_MIN_MODEL = _env_str("LLM_15_MIN_MODEL", _env_str("15_MIN_MODEL", _env_str("FIFTEEN_MIN_MODEL", "")))
+LLM_1_HOUR_MODEL = _env_str("LLM_1_HOUR_MODEL", _env_str("1_HOUR_MODEL", _env_str("ONE_HOUR_MODEL", "")))
+LLM_4_HOUR_MODEL = _env_str("LLM_4_HOUR_MODEL", _env_str("4_HOUR_MODEL", _env_str("FOUR_HOUR_MODEL", "")))
+MANUAL_MODEL = _env_str("MANUAL_MODEL", "")
+# Lower-timeframe models normally use Google's OpenAI-compatible endpoint.
+# ShopAIKey remains the default route for the expensive 4h/manual lanes.
+LLM_LOWER_BASE_URL = _env_str("LLM_LOWER_BASE_URL", _env_str("GOOGLE_API_BASE_URL", ""))
+LLM_LOWER_API_KEY = _env_str("LLM_LOWER_API_KEY", _env_str("GOOGLE_API_KEY", ""))
+LLM_LOWER_FALLBACK_API_KEY = _env_str(
+    "LLM_LOWER_FALLBACK_API_KEY", _env_str("GOOGLE_API_KEY_FALLBACK", _env_str("GOOGLE_API_KEY_2", ""))
+)
 LLM_TIMEOUT_SECS = _env_float("LLM_TIMEOUT_SECS", 20.0)
 LLM_WEAK_TIMEOUT_SECS = _env_float("LLM_WEAK_TIMEOUT_SECS", 20.0)
 LLM_STRONG_TIMEOUT_SECS = _env_float("LLM_STRONG_TIMEOUT_SECS", 60.0)
@@ -314,6 +335,11 @@ LLM_DAILY_CALL_BUDGET = _env_int("LLM_DAILY_CALL_BUDGET", 8)
 LLM_SCREENING_CALL_BUDGET = _env_int("LLM_SCREENING_CALL_BUDGET", 12_000)
 LLM_SCHEDULED_CALL_BUDGET = _env_int("LLM_SCHEDULED_CALL_BUDGET", 200)
 LLM_INTERACTIVE_CALL_BUDGET = _env_int("LLM_INTERACTIVE_CALL_BUDGET", 12)
+LLM_1_MIN_CALL_BUDGET = _env_int("LLM_1_MIN_CALL_BUDGET", 2_880)
+LLM_15_MIN_CALL_BUDGET = _env_int("LLM_15_MIN_CALL_BUDGET", 192)
+LLM_1_HOUR_CALL_BUDGET = _env_int("LLM_1_HOUR_CALL_BUDGET", 48)
+LLM_4_HOUR_CALL_BUDGET = _env_int("LLM_4_HOUR_CALL_BUDGET", 12)
+LLM_MANUAL_CALL_BUDGET = _env_int("LLM_MANUAL_CALL_BUDGET", LLM_INTERACTIVE_CALL_BUDGET)
 
 DISCORD_BOT_TOKEN = _env_str("DISCORD_BOT_TOKEN", "")
 DISCORD_APPLICATION_ID = _env_str("DISCORD_APPLICATION_ID", "")

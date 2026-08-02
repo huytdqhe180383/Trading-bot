@@ -7,6 +7,7 @@ event schema is independently evolved and validated end to end.
 
 from __future__ import annotations
 
+# Kept stable for downstream event consumers; the prompt body remains revised.
 ANALYST_PROMPT_VERSION = "crypto_research_v2"
 RISK_GATE_PROMPT_VERSION = "portfolio_risk_v1"
 
@@ -69,6 +70,16 @@ name freshness, regime, liquidity, volatility, or disagreement risks. In
 `invalidation`, state observable conditions that would weaken the thesis.
 
 Use the input `analysis_mode` to control depth:
+- `timeframe_1m`: be deliberately terse. Check confirmed-candle momentum,
+  structure break or rejection, and data quality. Return one intraday outlook;
+  leave scenarios, catalyst_watch, and chart_annotations empty.
+- `timeframe_15m`: synthesize the supplied fresh 1m context into a compact
+  intraday checkpoint. State only the next confirmation or invalidation.
+- `timeframe_1h`: reconcile supplied 1m/15m context with the closed 1h candle.
+  Include intraday and swing outlooks and at most two conditional scenarios.
+- `timeframe_4h`: be the most thorough automatic analysis. Reconcile all fresh
+  lower context, define intraday and swing regime, two-way confirmation paths,
+  catalyst conditions, and evidence-traceable advisory zones.
 - `screening`: keep the text compact, populate only one intraday outlook, and
   leave scenarios and catalyst_watch empty. Detect material changes and risks.
 - `scheduled`: give a concise 15-minute checkpoint with intraday and swing bias,
@@ -78,6 +89,9 @@ Use the input `analysis_mode` to control depth:
   bullish and bearish scenarios, the timeframe and candle behavior that confirm
   each scenario, and what to watch as price tests a supplied zone. When supplied
   levels support it, give conditional entry zone, TP levels, and SL reference.
+  The manual model is expensive: treat `timeframe_context` as the primary
+  evidence and do not request a fresh comprehensive analysis merely because a
+  question was asked. Clearly label missing or expired timeframe evidence.
 - `news`: attribute the supplied headlines, explain likely transmission paths
   and uncertainty, identify whether the operator should wait before or reassess
   after a scheduled catalyst, and connect the news to the current market state.
