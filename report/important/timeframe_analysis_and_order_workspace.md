@@ -28,6 +28,20 @@
   tab reads the existing SQLite-backed suggestion lifecycle and creates a
   bounded order plan. A pending plan still needs an explicit local demo
   confirmation; no real order is introduced by this change.
+- The **Analysis** workspace now has independent boxes: a filtered BTC
+  closed-candle timeframe feed and a manual-chat history. Automatic analysis
+  is no longer drawn as repeated chart markers or inserted into manual chat.
+- The timeframe box provides a Stop/Resume control. Stopping pauses future
+  work without shutting down the web service or deleting events.
+
+## Provider diagnosis (2026-08-02)
+
+The live scheduler attempted the lower 1m and 15m model lanes, but the process
+reported `LLM_LOWER_BASE_URL is not configured`. This is a configuration
+failure before any Google request can be made, not a scheduler failure. Supply
+an explicit Google OpenAI-compatible URL and lower-provider key in `.env`, then
+restart the local analyst web service. No key, URL, or `.env` value was read by
+this work session.
 
 ## Verification
 

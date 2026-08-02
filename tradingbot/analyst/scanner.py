@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from config import ANALYST_TIMEFRAME_POLL_SECS, ANALYST_STRONG_ANALYSIS_CADENCE, SYMBOLS
+from config import ANALYST_SYMBOLS, ANALYST_TIMEFRAME_POLL_SECS, ANALYST_STRONG_ANALYSIS_CADENCE
 
 from .discord_bot import DiscordNotifier, load_discord_config_from_env
 from .service import AnalystService, create_default_analyst_service
@@ -44,12 +44,13 @@ class AnalystScanner:
     """One poller, four candle-aligned lanes; old methods remain aliases."""
 
     service: AnalystService
-    symbols: Iterable[str] = field(default_factory=lambda: tuple(SYMBOLS))
+    symbols: Iterable[str] = field(default_factory=lambda: tuple(ANALYST_SYMBOLS))
     scan_interval_secs: int = ANALYST_TIMEFRAME_POLL_SECS
     background_analysis_cadence: str = ANALYST_STRONG_ANALYSIS_CADENCE
     notifier: DiscordNotifier | None = None
     _orchestrator: TimeframeAnalysisOrchestrator = field(init=False)
     _last_analysis_key: str = field(default="", init=False)
+    paused: bool = False
 
     def __post_init__(self) -> None:
         self._orchestrator = TimeframeAnalysisOrchestrator(
@@ -69,6 +70,8 @@ class AnalystScanner:
         return self._orchestrator.stage_by_symbol
 
     def run_once(self) -> list[dict]:
+        if self.paused:
+            return []
         if not hasattr(self.service, "run_timeframe_update"):
             return self._run_legacy_once()
         return self._orchestrator.run_due_once()

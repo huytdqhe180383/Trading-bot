@@ -276,6 +276,9 @@ ANALYST_RL_EVIDENCE_MAX_AGE_SECS = _env_int("ANALYST_RL_EVIDENCE_MAX_AGE_SECS", 
 ANALYST_TIMEFRAME_POLL_SECS = _env_int("ANALYST_TIMEFRAME_POLL_SECS", 5)
 ANALYST_TIMEFRAME_CONTEXT_TTL_SECS = _env_int("ANALYST_TIMEFRAME_CONTEXT_TTL_SECS", 14_400)
 MANUAL_ANALYSIS_CACHE_SECS = _env_int("MANUAL_ANALYSIS_CACHE_SECS", 300)
+# Analyst coverage is intentionally independent from the portfolio universe.
+# Start with BTC only to keep the evidence stream readable and economical.
+ANALYST_SYMBOLS = _env_csv("ANALYST_SYMBOLS", ("BTCUSDT",))
 
 # Official X accounts are an alert source only. The X API requires an app-only
 # bearer token; posts are never treated as authoritative economic releases.

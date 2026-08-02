@@ -18,7 +18,7 @@ import {
   Time,
   UTCTimestamp,
 } from "lightweight-charts";
-import { fetchAnalystSignals, fetchCandles } from "@/lib/api";
+import { fetchCandles } from "@/lib/api";
 import { calculateSupportResistance, selectVisibleChartAnnotations } from "@/lib/chartAnalysis";
 import type { AnalystEvent, Candle } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
@@ -41,7 +41,6 @@ const markerColor: Record<string, string> = {
   AVOID: "#f97316",
 };
 const CANDLE_REFRESH_MS = Math.max(1_000, Number(process.env.NEXT_PUBLIC_CANDLE_REFRESH_MS || 5_000));
-const SIGNAL_REFRESH_MS = 10_000;
 
 export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -58,7 +57,7 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState("");
-  const { symbol, interval, indicators, setEvents, events, supportResistanceRequest, clearChartOverlaysRequestId } = useTradingStore();
+  const { symbol, interval, indicators, events, supportResistanceRequest, clearChartOverlaysRequestId } = useTradingStore();
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -186,30 +185,10 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
     };
   }, [interval, setError, symbol]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const refreshSignals = async () => {
-      try {
-        const signals = await fetchAnalystSignals();
-        if (cancelled) return;
-        setEvents(signals);
-      } catch {
-        // The sidebar will show auth/API problems; chart markers are advisory only.
-      }
-    };
-
-    void refreshSignals();
-    const timer = window.setInterval(() => {
-      void refreshSignals();
-    }, SIGNAL_REFRESH_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [setEvents]);
-
-  const markers = useMemo(() => buildMarkers(events, candles), [events, candles]);
+  // Automatic timeframe events belong in their dedicated panel. Keeping them
+  // off the chart prevents one marker per candle from hiding price structure.
+  const manualChartEvents = useMemo(() => events.filter((event) => event.event_type === "chat_reply"), [events]);
+  const markers = useMemo(() => buildMarkers(manualChartEvents, candles), [manualChartEvents, candles]);
 
   useEffect(() => {
     markerApiRef.current?.setMarkers(markers);
@@ -225,7 +204,7 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
     agentAnnotationPriceLinesRef.current.forEach((line) => candleSeries.removePriceLine(line));
     agentAnnotationPriceLinesRef.current = [];
 
-    for (const annotation of selectVisibleChartAnnotations(events, symbol)) {
+    for (const annotation of selectVisibleChartAnnotations(manualChartEvents, symbol)) {
       if (annotation.kind === "support" || annotation.kind === "resistance") {
         agentAnnotationPriceLinesRef.current.push(
           candleSeries.createPriceLine({
@@ -254,7 +233,7 @@ export default function ChartPanel({ drawingEnabled, setError }: ChartPanelProps
       ]);
       agentAnnotationSeriesRef.current.push(series);
     }
-  }, [candles, events, symbol]);
+  }, [candles, manualChartEvents, symbol]);
 
   useEffect(() => {
     const chart = chartRef.current;

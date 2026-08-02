@@ -24,6 +24,13 @@ class _FakeService:
 
 
 class AnalystScannerTest(unittest.TestCase):
+    def test_paused_scanner_does_not_start_timeframe_or_legacy_work(self):
+        service = _FakeService()
+        scanner = AnalystScanner(service=service, symbols=("BTCUSDT",), paused=True)
+
+        self.assertEqual(scanner.run_once(), [])
+        self.assertEqual(service.calls, [])
+
     def test_each_cycle_uses_weak_screening_and_only_one_strong_call_per_cadence(self):
         service = _FakeService()
         scanner = AnalystScanner(service=service, symbols=("BTCUSDT",), background_analysis_cadence="15m")

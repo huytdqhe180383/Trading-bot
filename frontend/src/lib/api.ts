@@ -1,4 +1,4 @@
-import type { AnalystBudget, AnalystEvent, Candle, ChartInterval, OrderSuggestion, SymbolCode } from "./types";
+import type { AnalystBudget, AnalystEvent, AnalystRuntimeStatus, Candle, ChartInterval, OrderSuggestion, SymbolCode } from "./types";
 
 const DEFAULT_API_URL = "http://127.0.0.1:8080";
 const DEFAULT_WS_URL = "ws://127.0.0.1:8080/ws/analyst";
@@ -95,6 +95,17 @@ export async function fetchLatestNews(symbol: SymbolCode): Promise<AnalystEvent>
     method: "POST",
     body: JSON.stringify({ symbol, latest_news: true }),
   });
+}
+
+export async function setTimeframeSchedulerPaused(paused: boolean): Promise<{ paused: boolean; message: string }> {
+  return requestJson<{ paused: boolean; message: string }>("/api/analyst/scheduler", {
+    method: "POST",
+    body: JSON.stringify({ paused }),
+  });
+}
+
+export async function fetchAnalystStatus(): Promise<AnalystRuntimeStatus> {
+  return requestJson<AnalystRuntimeStatus>("/api/analyst/status");
 }
 
 export async function fetchOrderSuggestions(): Promise<OrderSuggestion[]> {

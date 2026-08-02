@@ -7,6 +7,7 @@ import ChartPanel from "@/components/ChartPanel";
 import StatusPill from "@/components/StatusPill";
 import Toolbar from "@/components/Toolbar";
 import OrdersJournalPanel from "@/components/OrdersJournalPanel";
+import TimeframeAnalysisPanel from "@/components/TimeframeAnalysisPanel";
 import { useTradingStore } from "@/store/useTradingStore";
 
 export default function Home() {
@@ -49,7 +50,10 @@ export default function Home() {
             {error && <div className="event-card error">{error}</div>}
             <ChartPanel drawingEnabled={drawingEnabled} setError={setError} />
           </section>
-          <AnalystSidebar busy={busy} setBusy={setBusy} setError={setError} />
+          <aside className="analyst-column">
+            <TimeframeAnalysisPanel />
+            <AnalystSidebar busy={busy} setBusy={setBusy} setError={setError} />
+          </aside>
           </div> : <div className="orders-workspace"><OrdersJournalPanel symbol={symbol} /></div>}
       </section>
     </main>

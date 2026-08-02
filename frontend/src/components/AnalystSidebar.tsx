@@ -77,9 +77,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
     }
   }, [events.length, userMessages.length]);
 
-  const timeframeEvents = events.filter((event) => event.event_type === "timeframe_15m" && event.symbol === symbol);
-  const latestTimeframe = timeframeEvents.at(-1);
-  const chatEvents = events.filter((event) => !["news", "news_analysis", "screening", "timeframe_1m"].includes(event.event_type));
+  const chatEvents = events.filter((event) => event.event_type === "chat_reply" || event.event_type === "explain");
   const chatItems: ChatItem[] = [
     ...chatEvents.map((event) => ({ kind: "event" as const, event, created_at_utc: event.created_at_utc })),
     ...userMessages,
@@ -135,7 +133,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
     <aside className={`sidebar ${chatExpanded ? "expanded" : ""}`}>
       <div className="sidebar-header">
         <div className="sidebar-title-row">
-          <h2>Analyst chat</h2>
+          <h2>Manual chat</h2>
           <button
             aria-label={chatExpanded ? "Collapse chat" : "Expand chat"}
             className="button ghost sidebar-expand-button"
@@ -147,17 +145,9 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
           </button>
         </div>
         <p>
-          Strong manual analysis covers intraday and swing horizons, momentum, two-way scenarios, and conditional
-          planning levels. It remains advisory and cannot execute an order.
+          Manual analysis consumes only fresh timeframe evidence. It is advisory and cannot execute an order.
         </p>
-        <p className="scanner-heartbeat">
-          15m alert lane: {latestTimeframe ? `${latestTimeframe.recommendation || "checked"} · ${formatTime(latestTimeframe.created_at_utc)}` : "waiting for a closed candle…"}
-        </p>
-        {budget && (
-          <p>
-            Manual: {budget.timeframes?.manual?.used ?? budget.interactive_used}/{budget.timeframes?.manual?.limit ?? budget.interactive_limit} · 1m: {budget.timeframes?.timeframe_1m?.used ?? 0}/{budget.timeframes?.timeframe_1m?.limit ?? 0} · 15m: {budget.timeframes?.timeframe_15m?.used ?? 0}/{budget.timeframes?.timeframe_15m?.limit ?? 0}
-          </p>
-        )}
+        {budget && <p>Manual budget: {budget.timeframes?.manual?.used ?? budget.interactive_used}/{budget.timeframes?.manual?.limit ?? budget.interactive_limit}</p>}
       </div>
 
       <div ref={scrollRef} className="events">
@@ -167,7 +157,7 @@ export default function AnalystSidebar({ busy, setBusy, setError }: AnalystSideb
               <span>System</span>
               <span>waiting</span>
             </div>
-            <p className="event-message">No analyst events yet. Ask a question, request an update, or fetch latest news.</p>
+            <p className="event-message">Ask a question to create a manual, evidence-backed analyst answer.</p>
           </div>
         ) : (
           chatItems.map((item) =>

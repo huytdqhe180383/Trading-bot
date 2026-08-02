@@ -101,6 +101,10 @@ class OrderActionRequest(BaseModel):
     suggestion_id: str
 
 
+class SchedulerControlRequest(BaseModel):
+    paused: bool
+
+
 def _client_identity(request: Request) -> str:
     host = request.client.host if request.client else "unknown"
     return f"{host}:{request.url.path}"
@@ -393,6 +397,7 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
             "last_completed_at": getattr(scanner, "last_screening_completed_at", ""),
             "last_results": _scheduler_result_summary(getattr(scanner, "last_screening_results", [])),
             "stage_by_symbol": getattr(scanner, "screening_stage_by_symbol", {}),
+            "paused": bool(getattr(scanner, "paused", False)),
             "tasks": {
                 name: {
                     "running": not task.done(),
@@ -434,6 +439,21 @@ def create_app(ctx: UIAppContext | None = None) -> FastAPI:
                 scope="interactive",
             )
         return JSONResponse(event.to_public_dict())
+
+    @app.post("/api/analyst/scheduler")
+    async def api_analyst_scheduler(request: Request, payload: SchedulerControlRequest) -> JSONResponse:
+        await _validate_csrf(request)
+        scanner = getattr(app.state, "analyst_scanner", None)
+        if scanner is None:
+            raise HTTPException(status_code=409, detail="The embedded timeframe scheduler is not running.")
+        scanner.paused = bool(payload.paused)
+        _write_audit(
+            context,
+            "timeframe_scheduler",
+            outcome="paused" if scanner.paused else "resumed",
+            request=request,
+        )
+        return JSONResponse({"paused": scanner.paused, "message": "Timeframe analysis paused." if scanner.paused else "Timeframe analysis resumed."})
 
     @app.get("/api/analyst/events")
     async def api_analyst_events(request: Request, limit: int | None = None) -> JSONResponse:

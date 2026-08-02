@@ -45,6 +45,19 @@ export type AnalystBudget = {
   timeframes?: Record<string, { used: number; limit: number }>;
 };
 
+export type AnalystRuntimeStatus = {
+  enabled: boolean;
+  budgets: AnalystBudget;
+  scheduler?: {
+    enabled: boolean;
+    paused: boolean;
+    poll_interval_secs?: number;
+    candle_aligned_timeframes?: string[];
+    last_completed_at?: string;
+    stage_by_symbol?: Record<string, string>;
+  };
+};
+
 export type ChartAnnotation =
   | { kind: "support"; price: number; label: string }
   | { kind: "resistance"; price: number; label: string }

@@ -4,7 +4,7 @@ import { ChevronDown, Eraser, LineChart, PenLine, RefreshCcw } from "lucide-reac
 import type { ChartInterval, IndicatorKey, SymbolCode } from "@/lib/types";
 import { useTradingStore } from "@/store/useTradingStore";
 
-const SYMBOLS: SymbolCode[] = ["BTCUSDT", "ETHUSDT"];
+const SYMBOLS: SymbolCode[] = ["BTCUSDT"];
 const INTERVALS: { value: ChartInterval; label: string }[] = [
   { value: "1m", label: "1m" },
   { value: "5m", label: "5m" },
