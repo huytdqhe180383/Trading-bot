@@ -51,6 +51,24 @@ class AnalystLLMTest(unittest.TestCase):
         self.assertEqual(calls[0][1]["json"]["model"], "cheap-model")
         self.assertNotIn("secret", str(calls[0][1]["json"]))
 
+    def test_chat_json_uses_google_openai_compatibility_path_without_extra_v1(self):
+        calls = []
+
+        def post(url, **kwargs):
+            calls.append(url)
+            return _Response({"choices": [{"message": {"content": json.dumps({"recommendation": "HOLD"})}}]})
+
+        client = OpenAICompatibleLLMClient(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+            api_key="secret",
+            model="gemini-test",
+            post=post,
+        )
+
+        client.chat_json(messages=[{"role": "user", "content": "{}"}])
+
+        self.assertEqual(calls, ["https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"])
+
     def test_provider_error_is_not_converted_to_decision(self):
         def post(url, **kwargs):
             raise TimeoutError("timeout")

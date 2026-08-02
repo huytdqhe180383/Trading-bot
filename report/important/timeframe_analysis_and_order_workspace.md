@@ -39,12 +39,17 @@
 
 ## Provider diagnosis (2026-08-02)
 
-The live scheduler attempted the lower 1m and 15m model lanes, but the process
-reported `LLM_LOWER_BASE_URL is not configured`. This is a configuration
-failure before any Google request can be made, not a scheduler failure. Supply
-an explicit Google OpenAI-compatible URL and lower-provider key in `.env`, then
-restart the local analyst web service. No key, URL, or `.env` value was read by
-this work session.
+The lower lanes were corrected to use the explicit Google OpenAI-compatible
+base (`.../v1beta/openai`) without an extra `/v1` suffix. The Google key was
+accepted and its model catalog was queried without exposing credentials.
+Saved display labels were replaced with valid API identifiers:
+`gemma-4-31b-it`, `gemini-3.5-flash-lite`, and `gemini-3.6-flash`.
+
+The 1m and 15m lanes subsequently completed successfully. The 1h lane uses an
+explicit 60-second timeout, since its former inherited 20-second timeout was
+insufficient. The primary ShopAI variable is accepted as `SHOPAI_KEY` (an alias
+for the 4h/manual primary key) so it no longer needs to be duplicated as
+`LLM_API_KEY`.
 
 ## Verification
 

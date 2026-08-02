@@ -302,7 +302,9 @@ X_NEWS_POSTS_PER_ACCOUNT = _env_int("X_NEWS_POSTS_PER_ACCOUNT", 2)
 X_NEWS_API_BASE_URL = _env_str("X_NEWS_API_BASE_URL", "https://api.x.com/2")
 
 LLM_BASE_URL = _env_str("LLM_BASE_URL", "")
-LLM_API_KEY = _env_str("LLM_API_KEY", "")
+# ShopAI is the primary provider for the 4h/manual lanes. Keep both names as
+# aliases for the same configured secret; neither supplies a built-in value.
+LLM_API_KEY = _env_str("LLM_API_KEY", _env_str("SHOPAI_KEY", ""))
 LLM_MODEL = _env_str("LLM_MODEL", "")
 # Preferred names make the cost/quality routing explicit. The older names
 # remain supported so existing installations do not lose their configuration.
@@ -328,6 +330,9 @@ LLM_LOWER_FALLBACK_API_KEY = _env_str(
 LLM_TIMEOUT_SECS = _env_float("LLM_TIMEOUT_SECS", 20.0)
 LLM_WEAK_TIMEOUT_SECS = _env_float("LLM_WEAK_TIMEOUT_SECS", 20.0)
 LLM_STRONG_TIMEOUT_SECS = _env_float("LLM_STRONG_TIMEOUT_SECS", 60.0)
+LLM_1_MIN_TIMEOUT_SECS = _env_float("LLM_1_MIN_TIMEOUT_SECS", LLM_WEAK_TIMEOUT_SECS)
+LLM_15_MIN_TIMEOUT_SECS = _env_float("LLM_15_MIN_TIMEOUT_SECS", LLM_WEAK_TIMEOUT_SECS)
+LLM_1_HOUR_TIMEOUT_SECS = _env_float("LLM_1_HOUR_TIMEOUT_SECS", LLM_STRONG_TIMEOUT_SECS)
 LLM_USE_RESPONSE_FORMAT = _env_bool("LLM_USE_RESPONSE_FORMAT", False)
 LLM_FAILURE_THRESHOLD = _env_int("LLM_FAILURE_THRESHOLD", 3)
 LLM_FAILURE_COOLDOWN_SECS = _env_float("LLM_FAILURE_COOLDOWN_SECS", 300.0)

@@ -49,7 +49,10 @@ class OpenAICompatibleLLMClient:
             raise LLMProviderError(f"{self.model_config_name} is not configured.")
 
         endpoint = f"{self.base_url}/chat/completions"
-        if not self.base_url.endswith("/v1"):
+        # Google exposes an OpenAI-compatible surface at
+        # ``.../v1beta/openai``.  It already includes the compatibility
+        # namespace, unlike providers whose base URL ends before ``/v1``.
+        if not (self.base_url.endswith("/v1") or self.base_url.endswith("/openai")):
             endpoint = f"{self.base_url}/v1/chat/completions"
         body = {
             "model": self.model,

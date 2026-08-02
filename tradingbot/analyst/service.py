@@ -33,8 +33,11 @@ from config import (
     LLM_INTERACTIVE_MODEL,
     LLM_INTERACTIVE_CALL_BUDGET,
     LLM_1_HOUR_CALL_BUDGET,
+    LLM_1_HOUR_TIMEOUT_SECS,
     LLM_1_MIN_CALL_BUDGET,
+    LLM_1_MIN_TIMEOUT_SECS,
     LLM_15_MIN_CALL_BUDGET,
+    LLM_15_MIN_TIMEOUT_SECS,
     LLM_4_HOUR_CALL_BUDGET,
     LLM_MANUAL_CALL_BUDGET,
     LLM_SCHEDULED_CALL_BUDGET,
@@ -652,17 +655,21 @@ def create_default_analyst_service() -> AnalystService:
             model_config_name=f"LLM_{label}_MODEL",
             base_url_config_name="LLM_LOWER_BASE_URL",
             api_key_config_name="LLM_LOWER_API_KEY",
-            timeout_secs=LLM_WEAK_TIMEOUT_SECS or LLM_TIMEOUT_SECS,
+            timeout_secs=timeout_secs,
             use_response_format=LLM_USE_RESPONSE_FORMAT,
             ),
             OpenAICompatibleLLMClient(
                 base_url=lower_base, api_key=LLM_LOWER_FALLBACK_API_KEY, model=model,
                 model_config_name=f"LLM_{label}_MODEL fallback", base_url_config_name="LLM_LOWER_BASE_URL",
-                api_key_config_name="LLM_LOWER_FALLBACK_API_KEY", timeout_secs=LLM_WEAK_TIMEOUT_SECS or LLM_TIMEOUT_SECS,
+                api_key_config_name="LLM_LOWER_FALLBACK_API_KEY", timeout_secs=timeout_secs,
                 use_response_format=LLM_USE_RESPONSE_FORMAT,
             ) if LLM_LOWER_FALLBACK_API_KEY else None,
         )
-        for lane, label, model in (("1m", "1_MIN", LLM_1_MIN_MODEL), ("15m", "15_MIN", LLM_15_MIN_MODEL), ("1h", "1_HOUR", LLM_1_HOUR_MODEL))
+        for lane, label, model, timeout_secs in (
+            ("1m", "1_MIN", LLM_1_MIN_MODEL, LLM_1_MIN_TIMEOUT_SECS),
+            ("15m", "15_MIN", LLM_15_MIN_MODEL, LLM_15_MIN_TIMEOUT_SECS),
+            ("1h", "1_HOUR", LLM_1_HOUR_MODEL, LLM_1_HOUR_TIMEOUT_SECS),
+        )
     }
     lower_clients["timeframe_4h"] = OpenAICompatibleLLMClient(
         base_url=LLM_BASE_URL, api_key=LLM_API_KEY, model=LLM_4_HOUR_MODEL,
